@@ -5,7 +5,7 @@ DEB_HOST_MULTIARCH=
 
 override_dh_auto_configure:
 	$(info $$CURDIR is [${CURDIR}])
-	dh_auto_configure -- --with-etnaviv-source=$(CURDIR)/../etna_viv --enable-etnaviv
+	dh_auto_configure -- --with-etnaviv-source=$(CURDIR)/etna_viv --enable-etnaviv
 
 override_dh_auto_install:
 	dh_auto_install --destdir=debian/tmp
