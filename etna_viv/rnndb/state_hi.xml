@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2012-2016 The Etnaviv Project
+
+ Permission is hereby granted, free of charge, to any person obtaining a
+ copy of this software and associated documentation files (the "Software"),
+ to deal in the Software without restriction, including without limitation
+ the rights to use, copy, modify, merge, publish, distribute, sub license,
+ and/or sell copies of the Software, and to permit persons to whom the
+ Software is furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice (including the
+ next paragraph) shall be included in all copies or substantial portions
+ of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ DEALINGS IN THE SOFTWARE.
+-->
+<database xmlns="http://nouveau.freedesktop.org/"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
+
+<import file="copyright.xml"/>
+
+<!-- Vivante GCxxxx render states and registers overview:
+     Host interface (HI) registers
+  -->
+<domain name="VIVS" brief="GPU state">
+    <!-- Hardware description fields.
+         For access in userspace these are also exposed over the ioctl interface through QUERY_CHIP_IDENTITY.
+     -->
+
+    <stripe name="HI" brief="Host Interface">
+        <doc>Host interface contains bits to identify the chip, control clock speed,
+            and enable/acknowledge interrupts.
+        </doc>
+        <reg32 offset="0x00000" name="CLOCK_CONTROL">
+            <bitfield high="0" low="0" name="CLK3D_DIS" brief="Disable 3D clock"/>
+            <bitfield high="1" low="1" name="CLK2D_DIS" brief="Disable 2D clock"/>
+            <bitfield high="8" low="2" name="FSCALE_VAL"/>
+            <bitfield high="9" low="9" name="FSCALE_CMD_LOAD"/>
+            <bitfield high="10" low="10" name="DISABLE_RAM_CLK_GATING" brief="Disable clock gating from rams"/>
+            <bitfield high="11" low="11" name="DISABLE_DEBUG_REGISTERS" brief="Disable debug registers">
+                <doc>If this bit is 1, debug registers are clock gated.</doc>
+            </bitfield>
+            <bitfield high="12" low="12" name="SOFT_RESET" brief="Soft resets the GPU"/>
+            <bitfield high="16" low="16" name="IDLE_3D" brief="3D pipe is idle"/>
+            <bitfield high="17" low="17" name="IDLE_2D" brief="2D pipe is idle"/>
+            <bitfield high="18" low="18" name="IDLE_VG" brief="VG pipe is idle"/>
+            <bitfield high="19" low="19" name="ISOLATE_GPU" brief="Isolate GPU bit"/>
+            <bitfield high="23" low="20" name="DEBUG_PIXEL_PIPE" brief="Select pixel pipe for debug registers"/>
+        </reg32>
+        <reg32 offset="0x00004" name="IDLE_STATE" brief="Idle state">
+            <doc>Bits are 1 if the module is idle, 0 otherwise.</doc>
+            <bitfield pos="0" name="FE" brief="Fetch Engine is idle"/>
+            <bitfield pos="1" name="DE" brief="Drawing Engine is idle"/>
+            <bitfield pos="2" name="PE" brief="Pixel Engine is idle"/>
+            <bitfield pos="3" name="SH" brief="Shader Engine is idle"/>
+            <bitfield pos="4" name="PA" brief="Primitive Assembly is idle"/>
+            <bitfield pos="5" name="SE" brief="Setup Engine is idle"/>
+            <bitfield pos="6" name="RA" brief="Rasterizer is idle"/>
+            <bitfield pos="7" name="TX" brief="Texture Engine is idle"/>
+            <bitfield pos="8" name="VG" brief="Vector Graphics is idle"/>
+            <bitfield pos="9" name="IM" brief="IM is idle"/>
+            <bitfield pos="10" name="FP" brief="Fragment processor is idle"/>
+            <bitfield pos="11" name="TS" brief="Tile status is idle"/>
+            <bitfield pos="31" name="AXI_LP" brief="AXI bus in low power mode"/>
+        </reg32>
+        <reg32 offset="0x00008" name="AXI_CONFIG" brief="AXI bus configuration">
+            <bitfield high="3" low="0" name="AWID"/>
+            <bitfield high="7" low="4" name="ARID"/>
+            <bitfield high="11" low="8" name="AWCACHE"/>
+            <bitfield high="15" low="12" name="ARCACHE"/>
+        </reg32>
+        <reg32 offset="0x0000C" name="AXI_STATUS" brief="AXI bus status">
+            <bitfield high="3" low="0" name="WR_ERR_ID"/>
+            <bitfield high="7" low="4" name="RD_ERR_ID"/>
+            <bitfield high="8" low="8" name="DET_WR_ERR"/>
+            <bitfield high="9" low="9" name="DET_RD_ERR"/>
+        </reg32>
+        <reg32 offset="0x00010" name="INTR_ACKNOWLEDGE" brief="Interrupt acknowledge register">
+            <bitfield high="29" low="0" name="INTR_VEC" brief="Event signal interrupt bits"/>
+            <bitfield pos="30" name="MMU_EXCEPTION" brief="MMU exception interrupt"/>
+            <bitfield pos="31" name="AXI_BUS_ERROR" brief="AXI bus error interrupt"/>
+            <doc>Each bit represents a corresponding event being triggered.
+                Reading this register clears the interrupt flags.</doc>
+        </reg32>
+        <reg32 offset="0x00014" name="INTR_ENBL" brief="Interrupt enable register">
+            <doc>Each bit enabled a corresponding event.</doc>
+           <bitfield high="31" low="0" name="INTR_ENBL_VEC"/>
+        </reg32>
+        <reg32 offset="0x00018" name="CHIP_IDENTITY">
+           <doc>
+               Obsolete since GC500.
+           </doc>
+           <bitfield high="31" low="24" name="FAMILY"/>
+           <bitfield high="23" low="16" name="PRODUCT"/>
+           <bitfield high="15" low="12" name="REVISION"/>
+        </reg32>
+        <reg32 offset="0x0001C" name="CHIP_FEATURE" type="chipFeatures" brief="Chip features"/>
+        <reg32 offset="0x00020" name="CHIP_MODEL" type="chipModel" brief="Chip model"/>
+        <reg32 offset="0x00024" name="CHIP_REV" brief="Chip revision"/>
+        <reg32 offset="0x00028" name="CHIP_DATE" brief="Chip date"/>
+        <reg32 offset="0x0002C" name="CHIP_TIME" brief="Chip time"/>
+        <reg32 offset="0x00034" name="CHIP_MINOR_FEATURE_0" type="chipMinorFeatures0" brief="Chip minor features 0"/>
+        <reg32 offset="0x00038" name="CACHE_CONTROL"/>
+        <reg32 offset="0x0003C" name="MEMORY_COUNTER_RESET" brief="Memory counter reset">
+            <doc>
+                Writing 1 will reset the counters and stop counting. Write 0 to start counting again.
+            </doc>
+        </reg32>
+        <reg32 offset="0x00040" name="PROFILE_READ_BYTES8" brief="Total reads in terms of 64bits"/>
+        <reg32 offset="0x00044" name="PROFILE_WRITE_BYTES8" brief="Total writes in terms of 64bits"/>
+        <reg32 offset="0x00048" name="CHIP_SPECS" brief="Chip specifications">
+            <bitfield high="3" low="0" name="STREAM_COUNT"/>
+            <bitfield high="7" low="4" name="REGISTER_MAX"/>
+            <bitfield high="11" low="8" name="THREAD_COUNT"/>
+            <bitfield high="16" low="12" name="VERTEX_CACHE_SIZE"/>
+            <bitfield high="24" low="20" name="SHADER_CORE_COUNT"/>
+            <bitfield high="27" low="25" name="PIXEL_PIPES"/>
+            <bitfield high="31" low="28" name="VERTEX_OUTPUT_BUFFER_SIZE"/>
+        </reg32>
+        <reg32 offset="0x0004C" name="PROFILE_WRITE_BURSTS" brief="Total write Data Count in terms of 64bits value"/>
+        <reg32 offset="0x00050" name="PROFILE_WRITE_REQUESTS" brief="Total write Request Count"/>
+        <reg32 offset="0x00058" name="PROFILE_READ_BURSTS" brief="Total Read Data Count in terms of 64bits"/>
+        <reg32 offset="0x0005C" name="PROFILE_READ_REQUESTS" brief="Total Read Request Count"/>
+        <reg32 offset="0x00060" name="PROFILE_READ_LASTS" brief="Total RLAST Count"/>
+        <reg32 offset="0x00064" name="GP_OUT0" brief="General Purpose output register0. R/W but not connected to anywhere"/>
+        <reg32 offset="0x00068" name="GP_OUT1" brief="General Purpose output register1. R/W but not connected to anywhere"/>
+        <reg32 offset="0x0006C" name="GP_OUT2" brief="General Purpose output register2. R/W but not connected to anywhere"/>
+        <reg32 offset="0x00070" name="AXI_CONTROL" brief="Special Handling on AXI Bus">
+            <bitfield high="0" low="0" name="WR_FULL_BURST_MODE" brief="Write full burst mode"/>
+        </reg32>
+        <reg32 offset="0x00074" name="CHIP_MINOR_FEATURE_1" type="chipMinorFeatures1" brief="Chip minor features 1"/>
+        <reg32 offset="0x00078" name="PROFILE_TOTAL_CYCLES" brief="Total cycles">
+            <doc>This register is a free running counter.  It can be reset by writing 0 to it.</doc>
+        </reg32>
+        <reg32 offset="0x0007C" name="PROFILE_IDLE_CYCLES" brief="Total cycles where the GPU is idle">
+            <doc>It is reset when PROFILE_TOTAL_CYCLES register is written to. It looks at all the blocks but FE when determining the IP is
+            idle.
+            </doc>
+        </reg32>
+        <reg32 offset="0x00080" name="CHIP_SPECS_2" brief="Chip specifications 2">
+            <bitfield high="7" low="0" name="BUFFER_SIZE"/>
+            <bitfield high="15" low="8" name="INSTRUCTION_COUNT"/>
+            <bitfield high="31" low="16" name="NUM_CONSTANTS"/>
+        </reg32>
+        <reg32 offset="0x00084" name="CHIP_MINOR_FEATURE_2" type="chipMinorFeatures2" brief="Chip minor features 2"/>
+        <reg32 offset="0x00088" name="CHIP_MINOR_FEATURE_3" type="chipMinorFeatures3" brief="Chip minor features 3"/>
+        <reg32 offset="0x0008C" name="CHIP_SPECS_3" brief="Chip specifications 3">
+            <bitfield high="8" low="4" name="VARYINGS_COUNT"/>
+            <bitfield high="2" low="0" name="GPU_CORE_COUNT"/>
+        </reg32>
+        <reg32 offset="0x00090" name="COMPRESSION_FLAGS">
+            <bitfield pos="6" name="DEC300"/>
+        </reg32>
+        <reg32 offset="0x00094" name="CHIP_MINOR_FEATURE_4" type="chipMinorFeatures4" brief="Chip minor features 4"/>
+        <reg32 offset="0x0009C" name="CHIP_SPECS_4" brief="Chip specifications 4">
+            <bitfield high="16" low="12" name="STREAM_COUNT" brief="When zero, use stream count from CHIP_SPECS"/>
+        </reg32>
+        <reg32 offset="0x000A0" name="CHIP_MINOR_FEATURE_5" type="chipMinorFeatures5" brief="Chip minor features 5"/>
+        <reg32 offset="0x000A8" name="CHIP_PRODUCT_ID" brief="Chip product ID"/>
+        <reg32 offset="0x000D4" name="BLT_INTR" brief="Async blit interrupt read"/> <!-- ASYNC_BLIT -->
+        <reg32 offset="0x000EC" name="AUXBIT"/> <!-- ConfigurePolicyID in Vivante kernel driver -->
+    </stripe>
+
+    <!-- This block exists at 0x00200 for GC300 models with chipRevision < 0x2000 -->
+    <stripe name="PM" brief="Power Management">
+        <doc>Features to control power usage.</doc>
+        <reg32 offset="0x00100" name="POWER_CONTROLS" brief="Control register for module level power controls">
+            <bitfield high="0" low="0" name="ENABLE_MODULE_CLOCK_GATING" brief="Enables module level clock gating"/>
+            <bitfield high="1" low="1" name="DISABLE_STALL_MODULE_CLOCK_GATING" brief="Disables module level clock gating for stall condition"/>
+            <bitfield high="2" low="2" name="DISABLE_STARVE_MODULE_CLOCK_GATING" brief="Disabled module level clock gating for starve/idle condition"/>
+            <bitfield high="7" low="4" name="TURN_ON_COUNTER" brief="Number of clock cycles to wait after turning on the clock"/>
+            <bitfield high="31" low="16" name="TURN_OFF_COUNTER" brief="Counter value for clock gating the module if the module is idle for this amount of clock cycles"/>
+        </reg32>
+        <reg32 offset="0x00104" name="MODULE_CONTROLS" brief="Module level control registers">
+            <bitfield high="0" low="0" name="DISABLE_MODULE_CLOCK_GATING_FE" brief="Disables module level clock gating for FE"/>
+            <bitfield high="1" low="1" name="DISABLE_MODULE_CLOCK_GATING_DE" brief="Disables module level clock gating for DE"/>
+            <bitfield high="2" low="2" name="DISABLE_MODULE_CLOCK_GATING_PE" brief="Disables module level clock gating for PE"/>
+            <bitfield high="3" low="3" name="DISABLE_MODULE_CLOCK_GATING_SH" brief="Disables module level clock gating for SH"/>
+            <bitfield high="4" low="4" name="DISABLE_MODULE_CLOCK_GATING_PA" brief="Disables module level clock gating for PA"/>
+            <bitfield high="5" low="5" name="DISABLE_MODULE_CLOCK_GATING_SE" brief="Disables module level clock gating for SE"/>
+            <bitfield high="6" low="6" name="DISABLE_MODULE_CLOCK_GATING_RA" brief="Disables module level clock gating for RA"/>
+            <bitfield high="7" low="7" name="DISABLE_MODULE_CLOCK_GATING_TX" brief="Disables module level clock gating for TX"/>
+            <bitfield high="16" low="16" name="DISABLE_MODULE_CLOCK_GATING_RA_EZ" brief="Disables module level clock gating for RA EZ"/>
+            <bitfield high="17" low="17" name="DISABLE_MODULE_CLOCK_GATING_RA_HZ" brief="Disables module level clock gating for RA HZ"/>
+        </reg32>
+        <reg32 offset="0x00108" name="MODULE_STATUS" brief="Module level control status">
+            <bitfield high="0" low="0" name="MODULE_CLOCK_GATED_FE" brief="Module level clock gating is ON for FE"/>
+            <bitfield high="1" low="1" name="MODULE_CLOCK_GATED_DE" brief="Module level clock gating is ON for DE"/>
+            <bitfield high="2" low="2" name="MODULE_CLOCK_GATED_PE" brief="Module level clock gating is ON for PE"/>
+            <bitfield high="3" low="3" name="MODULE_CLOCK_GATED_SH" brief="Module level clock gating is ON for SH"/>
+            <bitfield high="4" low="4" name="MODULE_CLOCK_GATED_PA" brief="Module level clock gating is ON for PA"/>
+            <bitfield high="5" low="5" name="MODULE_CLOCK_GATED_SE" brief="Module level clock gating is ON for SE"/>
+            <bitfield high="6" low="6" name="MODULE_CLOCK_GATED_RA" brief="Module level clock gating is ON for RA"/>
+            <bitfield high="7" low="7" name="MODULE_CLOCK_GATED_TX" brief="Module level clock gating is ON for TX"/>
+        </reg32>
+        <reg32 offset="0x0010C" name="PULSE_EATER" brief="Pulse eater">  <!-- power management feature -->
+            <bitfield pos="0" name="DISABLE"/> <!-- pulsed high to disable pulse eater before reset -->
+            <bitfield high="15" low="8" name="DVFS_PERIOD"/>
+            <bitfield pos="16" name="UNK16"/> <!-- cleared on GC1000 revision 0x5039 and 0x5040 -->
+            <bitfield pos="17" name="UNK17"/> <!-- set on GC4000 revision 0x5208 and 0x5222 -->
+            <bitfield pos="18" name="INTERNAL_DFS"/> <!-- set on all revision > 0x5420 with 3D PIPE -->
+            <bitfield pos="19" name="UNK19"/> <!-- DVFS -->
+            <bitfield pos="20" name="UNK20"/> <!-- DVFS -->
+            <bitfield pos="22" name="UNK22"/> <!-- DVFS -->
+            <bitfield pos="23" name="UNK23"/> <!-- set on GC4000 revision 0x5208 and 0x5222 -->
+	</reg32>
+    </stripe>
+
+    <enum name="MMU_EXCEPTION">
+        <value value="1" name="SLAVE_NOT_PRESENT"/>
+        <value value="2" name="PAGE_NOT_PRESENT"/>
+        <value value="3" name="WRITE_VIOLATION"/>
+    </enum>
+    <stripe name="MMUv2" brief="Memory Management Unit v2">
+        <doc>New MMU unit. Only exists on more recent hardware.</doc>
+        <reg32 offset="0x00180" name="SAFE_ADDRESS" brief="MMU safe address">
+            <doc>
+            A 64-byte range starting from this address that will act as a 'safe' zone.
+            Any address that would cause an exception is routed to this safe zone.
+            Reads will happen and writes will go to this address, but with a write-enable
+            of 0. This register can only be programmed once after a reset. Any attempt to write
+            to this register after the initial write-after-reset will be ignored.
+            </doc>
+        </reg32>
+        <reg32 offset="0x00184" name="CONFIGURATION" masked="yes" brief="This register controls the master TLB of the MMU">
+            <bitfield high="0" low="0" name="MODE" brief="Mode for the master TLB">
+                <value value="0" name="MODE4_K" brief="The master TLB is 4kB in size and contains 1024 entries">
+                    <doc>Each page can be 4kB or 64kB in size.</doc>
+                </value>
+                <value value="1" name="MODE1_K" brief="The master TLB is 1kB in size and contains 256 entries">
+                    <doc>Each page can be 4kB, 64kB, 1MB or 16MB in size.</doc>
+                </value>
+            </bitfield>
+            <bitfield high="3" low="3" name="MODE_MASK"/>
+            <bitfield high="4" low="4" name="FLUSH" brief="Flush the MMU caches">
+                <value value="1" name="FLUSH"/>
+            </bitfield>
+            <bitfield high="7" low="7" name="FLUSH_MASK"/>
+            <bitfield high="8" low="8" name="ADDRESS_MASK"/>
+            <bitfield high="31" low="10" name="ADDRESS" brief="Upper bits of the page aligned master TLB"/>
+        </reg32>
+        <reg32 offset="0x00188" name="STATUS" brief="Status register that holds which MMU generated an exception">
+            <bitfield high="1" low="0" name="EXCEPTION0" type="MMU_EXCEPTION" brief="MMU 0 caused an exception">
+                <doc>EXCEPTION_ADDR[0] will contain the exception address.</doc>
+            </bitfield>
+            <bitfield high="5" low="4" name="EXCEPTION1" type="MMU_EXCEPTION" brief="MMU 1 caused an exception">
+                <doc>EXCEPTION_ADDR[1] will contain the exception address.</doc>
+            </bitfield>
+            <bitfield high="9" low="8" name="EXCEPTION2" type="MMU_EXCEPTION" brief="MMU 2 caused an exception">
+                <doc>EXCEPTION_ADDR[2] will contain the exception address.</doc>
+            </bitfield>
+            <bitfield high="13" low="12" name="EXCEPTION3" type="MMU_EXCEPTION" brief="MMU 3 caused an exception">
+                <doc>EXCEPTION_ADDR[3] will contain the exception address.</doc>
+            </bitfield>
+        </reg32>
+        <reg32 offset="0x0018C" name="CONTROL" brief="Control register that enables the MMU">
+            <bitfield high="0" low="0" name="ENABLE" brief="Enable the MMU">
+                <doc>For security reasons, once the MMU is enabled it cannot be disabled anymore.</doc>
+            </bitfield>
+        </reg32>
+        <reg32 offset="0x00190" name="EXCEPTION_ADDR" length="4"/>
+        <reg32 offset="0x001A4" name="PROFILE_BLT_READ"/> <!-- Blit engine debug register read -->
+        <reg32 offset="0x001AC" name="UNK001AC"/> <!-- SECURITY || ROBUSTNESS -->
+        <reg32 offset="0x001C0" name="AXI_POLICY" length="8" stride="4">
+            <doc>
+                AXI config per policy ID, ConfigurePolicyID in Vivante kernel driver.
+                This allows setting different AXI configurations for different pages in the MMU.
+            </doc>
+        </reg32>
+    </stripe>
+
+    <stripe name="MC" brief="Memory Controller">
+        <reg32 offset="0x00400" name="MMU_FE_PAGE_TABLE" brief="Page table for DMA frontend"/>
+        <reg32 offset="0x00404" name="MMU_TX_PAGE_TABLE" brief="Page table for texture"/>
+        <reg32 offset="0x00408" name="MMU_PE_PAGE_TABLE" brief="Page table for PE color"/>
+        <reg32 offset="0x0040C" name="MMU_PEZ_PAGE_TABLE" brief="Page table for PE depth"/>
+        <reg32 offset="0x00410" name="MMU_RA_PAGE_TABLE" brief="Page table for rasterize"/>
+        <reg32 offset="0x00414" name="DEBUG_MEMORY">
+            <bitfield pos="3" name="SPECIAL_PATCH_GC320" brief="Special patch for 0x320 0x5220"/>
+            <bitfield pos="20" name="FAST_CLEAR_BYPASS" brief="Fast clear bypass"/>
+            <bitfield pos="21" name="COMPRESSION_BYPASS" brief="Compression bypass"/>
+        </reg32>
+        <reg32 offset="0x00418" name="MEMORY_BASE_ADDR_RA" brief="Base address for RA"/>
+        <reg32 offset="0x0041C" name="MEMORY_BASE_ADDR_FE" brief="Base address for FE"/>
+        <reg32 offset="0x00420" name="MEMORY_BASE_ADDR_TX" brief="Base address for TX"/>
+        <reg32 offset="0x00424" name="MEMORY_BASE_ADDR_PEZ" brief="Base address for PE depth"/>
+        <reg32 offset="0x00428" name="MEMORY_BASE_ADDR_PE" brief="Base address for PE color"/>
+        <reg32 offset="0x0042C" name="MEMORY_TIMING_CONTROL"/>
+        <reg32 offset="0x00430" name="MEMORY_FLUSH"/>
+        <reg32 offset="0x00438" name="PROFILE_CYCLE_COUNTER" brief="Cycles counter"/>
+        <reg32 offset="0x0043C" name="DEBUG_READ0"/>
+        <reg32 offset="0x00440" name="DEBUG_READ1"/>
+        <reg32 offset="0x00444" name="DEBUG_WRITE"/>
+        <reg32 offset="0x00448" name="PROFILE_RA_READ"/> <!-- Rasterize -->
+        <reg32 offset="0x0044C" name="PROFILE_TX_READ"/> <!-- Texture -->
+        <reg32 offset="0x00450" name="PROFILE_FE_READ"/> <!-- Front End -->
+        <reg32 offset="0x00454" name="PROFILE_PE_READ"/> <!-- Pixel Engine -->
+        <reg32 offset="0x00458" name="PROFILE_DE_READ"/> <!-- Drawing Engine -->
+        <reg32 offset="0x0045C" name="PROFILE_SH_READ"/> <!-- SHader -->
+        <reg32 offset="0x00460" name="PROFILE_PA_READ"/> <!-- Primitive Assembly -->
+        <reg32 offset="0x00464" name="PROFILE_SE_READ"/> <!-- Setup Engine -->
+        <reg32 offset="0x00468" name="PROFILE_MC_READ"/> <!-- Memory Controller -->
+        <reg32 offset="0x0046C" name="PROFILE_HI_READ"/> <!-- Host Interface -->
+        <reg32 offset="0x00470" name="PROFILE_CONFIG0" brief="Select profile counters">
+            <doc>
+                The performance counter selected here can be read from one of the associated
+                PROFILE_xx_READ registers. Selecting counter 15 resets
+                all the counters of that unit.
+            </doc>
+            <bitfield high="7" low="0" name="FE">
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="15" low="8" name="DE">
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="23" low="16" name="PE">
+                <value value="0" name="PIXEL_COUNT_KILLED_BY_COLOR_PIPE"/>
+                <value value="1" name="PIXEL_COUNT_KILLED_BY_DEPTH_PIPE"/>
+                <value value="2" name="PIXEL_COUNT_DRAWN_BY_COLOR_PIPE"/>
+                <value value="3" name="PIXEL_COUNT_DRAWN_BY_DEPTH_PIPE"/>
+                <value value="11" name="PIXELS_RENDERED_2D"/>
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="31" low="24" name="SH">
+                <value value="4" name="SHADER_CYCLES"/>
+                <value value="7" name="PS_INST_COUNTER"/>
+                <value value="8" name="RENDERED_PIXEL_COUNTER"/>
+                <value value="9" name="VS_INST_COUNTER"/>
+                <value value="10" name="RENDERED_VERTICE_COUNTER"/>
+                <value value="11" name="VTX_BRANCH_INST_COUNTER"/>
+                <value value="12" name="VTX_TEXLD_INST_COUNTER"/>
+                <value value="13" name="PXL_BRANCH_INST_COUNTER"/>
+                <value value="14" name="PXL_TEXLD_INST_COUNTER"/>
+                <value value="15" name="RESET"/>
+            </bitfield>
+        </reg32>
+        <reg32 offset="0x00474" name="PROFILE_CONFIG1">
+            <doc>
+                The performance counter selected here can be read from one of the associated
+                PROFILE_xx_READ registers. Selecting counter 15 resets
+                all the counters of that unit.
+            </doc>
+            <bitfield high="7" low="0" name="PA">
+                <value value="3" name="INPUT_VTX_COUNTER"/>
+                <value value="4" name="INPUT_PRIM_COUNTER"/>
+                <value value="5" name="OUTPUT_PRIM_COUNTER"/>
+                <value value="6" name="DEPTH_CLIPPED_COUNTER"/>
+                <value value="7" name="TRIVIAL_REJECTED_COUNTER"/>
+                <value value="8" name="CULLED_COUNTER"/>
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="15" low="8" name="SE">
+                <value value="0" name="CULLED_TRIANGLE_COUNT"/>
+                <value value="1" name="CULLED_LINES_COUNT"/>
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="23" low="16" name="RA">
+                <value value="0" name="VALID_PIXEL_COUNT"/>
+                <value value="1" name="TOTAL_QUAD_COUNT"/>
+                <value value="2" name="VALID_QUAD_COUNT_AFTER_EARLY_Z"/>
+                <value value="3" name="TOTAL_PRIMITIVE_COUNT"/> <!-- input primitives -->
+                <value value="9" name="PIPE_CACHE_MISS_COUNTER"/>
+                <value value="10" name="PREFETCH_CACHE_MISS_COUNTER"/>
+                <value value="11" name="CULLED_QUAD_COUNT"/>
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="31" low="24" name="TX">
+                <value value="0" name="TOTAL_BILINEAR_REQUESTS"/>
+                <value value="1" name="TOTAL_TRILINEAR_REQUESTS"/>
+                <value value="2" name="TOTAL_DISCARDED_TEXTURE_REQUESTS"/>
+                <value value="3" name="TOTAL_TEXTURE_REQUESTS"/>
+                <value value="4" name="UNKNOWN"/>
+                <value value="5" name="MEM_READ_COUNT"/>
+                <value value="6" name="MEM_READ_IN_8B_COUNT"/>
+                <value value="7" name="CACHE_MISS_COUNT"/>
+                <value value="8" name="CACHE_HIT_TEXEL_COUNT"/>
+                <value value="9" name="CACHE_MISS_TEXEL_COUNT"/>
+                <value value="15" name="RESET"/>
+                <!-- 0x80 - 0x9f TPG -->
+                <!-- 0xa0 - 0xbf TFB -->
+                <!-- 0xc0 - 0xff USC -->
+            </bitfield>
+        </reg32>
+        <reg32 offset="0x00478" name="PROFILE_CONFIG2">
+            <doc>
+                The performance counter selected here can be read from one of the associated
+                PROFILE_xx_READ registers. Selecting counter 15 resets
+                all the counters of that unit.
+            </doc>
+            <bitfield high="7" low="0" name="MC"> <!-- Also selects L2 -->
+                <value value="1" name="TOTAL_READ_REQ_8B_FROM_PIPELINE"/>
+                <value value="2" name="TOTAL_READ_REQ_8B_FROM_IP"/>
+                <value value="3" name="TOTAL_WRITE_REQ_8B_FROM_PIPELINE"/>
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="15" low="8" name="HI">
+                <value value="0" name="AXI_CYCLES_READ_REQUEST_STALLED"/>
+                <value value="1" name="AXI_CYCLES_WRITE_REQUEST_STALLED"/>
+                <value value="2" name="AXI_CYCLES_WRITE_DATA_STALLED"/>
+                <value value="15" name="RESET"/>
+            </bitfield>
+            <bitfield high="31" low="24" name="BLT">
+                <value value="0" name="UNK0"/>
+            </bitfield>
+        </reg32>
+        <reg32 offset="0x0047C" name="PROFILE_CONFIG3"/>
+        <reg32 offset="0x00480" name="BUS_CONFIG">
+                <bitfield high="3" low="0" name="FE_BUS_CONFIG" brief="not sure about the width"/>
+                <bitfield high="7" low="4" name="TX_BUS_CONFIG" brief="not sure about the width"/>
+        </reg32>
+        <reg32 offset="0x00554" name="START_COMPOSITION" brief="Kick off composition engine"/>
+        <reg32 offset="0x00558" name="FLAGS">
+                <bitfield pos="0" name="128B_MERGE"/>
+                <bitfield pos="27" name="TPCV11_COMPRESSION"/>
+        </reg32>
+        <reg32 offset="0x0055C" name="L2_CACHE_CONFIG"/>
+        <reg32 offset="0x00564" name="PROFILE_L2_READ"/>
+    </stripe>
+</domain>
+
+</database>
+

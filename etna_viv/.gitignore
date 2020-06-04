@@ -1,0 +1,8 @@
+*.bmp
+*.o
+*.pyc
+*.fdr
+*.swp
+*.so
+tags
+
