@@ -1,2 +1,3 @@
+etc/X11/xorg.conf
 usr/lib/arm-linux-gnueabihf/xorg/modules/drivers/*_drv.so /usr/lib/xorg/modules/drivers/
 usr/share/man
