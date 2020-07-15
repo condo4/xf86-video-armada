@@ -1,3 +1,0 @@
-[submodule "src/galcore_headers"]
-	path = attic/galcore_headers
-	url = https://github.com/etnaviv/galcore_headers.git

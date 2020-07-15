@@ -18,6 +18,7 @@ Build-Depends:
  automake,
  libtool,
  xutils-dev,
+ libetnaviv-dev,
  libdrm-armada-dev
 Standards-Version: 3.9.2
 
