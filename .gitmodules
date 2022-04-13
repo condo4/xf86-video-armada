@@ -1,0 +1,3 @@
+[submodule "etna_viv"]
+	path = etna_viv
+	url = https://github.com/laanwj/etna_viv.git
