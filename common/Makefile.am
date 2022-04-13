@@ -30,6 +30,7 @@ libcommon_la_SOURCES = \
 		drawable_desc.c \
 		fd.c \
 		fbutil.h \
+		fourcc.h \
 		gal_extension.h \
 		get_first_pixel.c \
 		glyph_assemble.c \

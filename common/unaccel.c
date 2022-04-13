@@ -192,6 +192,8 @@ static void unaccel_fixup_tile(DrawablePtr pDraw, PixmapPtr *ppPix)
 {
 	PixmapPtr pNew, pPixmap = *ppPix;
 
+#ifdef FB_24_32BIT
+#endif
 	if (FbEvenTile(pPixmap->drawable.width * pPixmap->drawable.bitsPerPixel)) {
 		prepare_cpu_drawable(&pPixmap->drawable, CPU_ACCESS_RW);
 		fbPadPixmap(pPixmap);

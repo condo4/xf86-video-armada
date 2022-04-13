@@ -16,7 +16,7 @@
 AM_CFLAGS = $(filter-out -Wnested-externs -Wcast-qual -Wredundant-decls \
 	-Werror=write-strings -Wshadow,$(CWARNFLAGS)) \
 	$(XORG_CFLAGS) $(DRMARMADA_CFLAGS) $(UDEV_CFLAGS) \
-	-I$(top_srcdir)/common
+	-iquote $(top_srcdir)/common
 
 armada_drv_la_LTLIBRARIES = armada_drv.la
 armada_drv_la_LDFLAGS = -module -avoid-version
@@ -28,11 +28,13 @@ armada_drv_la_SOURCES = armada_accel.h \
 			armada_drm.c \
 			armada_drm.h \
 			armada_drm_xv.c \
-			armada_fourcc.h \
 			armada_ioctl.h \
 			common_drm.c \
 			common_drm.h \
-			common_drm_helper.h
+			common_drm_conn.c \
+			common_drm_conn.h \
+			common_drm_helper.h \
+			common_drm_plane.c
 if HAVE_DRI2
 armada_drv_la_SOURCES += \
 			common_drm_dri2.c \

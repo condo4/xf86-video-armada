@@ -21,7 +21,6 @@
 #include "xf86.h"
 
 #include <armada_bufmgr.h>
-#include <etnaviv/state_2d.xml.h>
 #include "cpu_access.h"
 #include "gal_extension.h"
 #include "pamdump.h"
@@ -29,6 +28,10 @@
 
 #include "etnaviv_accel.h"
 #include "etnaviv_utils.h"
+
+#include <etnaviv/etna_bo.h>
+#include <etnaviv/common.xml.h>
+#include <etnaviv/state_2d.xml.h>
 #include "etnaviv_compat.h"
 
 static const char *etnaviv_errors[] = {
@@ -58,7 +61,11 @@ static const char *etnaviv_errors[] = {
 
 const char *etnaviv_strerror(int err)
 {
+	static char buf[80];
 	const char *str = NULL;
+
+	sprintf(buf, "code=%d:errno=%d", err, errno);
+	str = buf;
 
 	if (err < 0) {
 		if (err >= VIV_STATUS_GPU_NOT_RESPONDING)

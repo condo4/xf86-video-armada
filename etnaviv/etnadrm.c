@@ -10,18 +10,18 @@
 #include <sys/mman.h>
 #include <xf86.h>
 #include <xf86drm.h>
-#include <etnaviv/viv.h>
-#include <etnaviv/etna.h>
-#include <etnaviv/etna_bo.h>
-
-#include <etnaviv/state.xml.h>
 
 #include "bo-cache.h"
 #include "etnadrm.h"
 #include "etnaviv_drm.h"
-#include "etnaviv_compat.h"
 #include "compat-list.h"
 #include "utils.h"
+
+#include <etnaviv/viv.h>
+#include <etnaviv/etna.h>
+#include <etnaviv/etna_bo.h>
+#include <etnaviv/state.xml.h>
+#include "etnaviv_compat.h"
 
 struct etna_viv_conn {
 	struct viv_conn conn;
@@ -273,9 +273,9 @@ static void etnadrm_convert_timeout(struct drm_etnaviv_timespec *ts,
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
 	ts->tv_sec = now.tv_sec + timeout / 1000;
-	ts->tv_nsec = now.tv_nsec + (timeout % 1000) * 10000000;
-	if (ts->tv_nsec > 1000000000) {
-		ts->tv_nsec -= 1000000000;
+	ts->tv_nsec = now.tv_nsec + (timeout % 1000) * 1000 * 1000;
+	if (ts->tv_nsec > 1000 * 1000 * 1000) {
+		ts->tv_nsec -= 1000 * 1000 * 1000;
 		ts->tv_sec += 1;
 	}
 }

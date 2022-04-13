@@ -19,10 +19,11 @@
 #include "xf86Crtc.h"
 #include "xf86xv.h"
 #include "damage.h"
-#include "fourcc.h"
 #include <X11/extensions/Xv.h>
 
+#include "boxutil.h"
 #include "compat-api.h"
+#include "fourcc.h"
 #include "pixmaputil.h"
 #include "utils.h"
 #include "xv_attribute.h"
@@ -37,8 +38,10 @@
 #include "etnaviv_utils.h"
 #include "etnaviv_xv.h"
 
-#include "etnaviv/etna_bo.h"
-#include "etnaviv/state_2d.xml.h"
+#include <etnaviv/etna.h>
+#include <etnaviv/etna_bo.h>
+#include <etnaviv/state_2d.xml.h>
+#include "etnaviv_compat.h"
 
 /*
  * The Vivante GPU supports up to 32k x 32k, but that would be
@@ -68,6 +71,12 @@ static XF86VideoFormatRec etnaviv_formats[] = {
 		.depth = 16,
 		.class = TrueColor,
 	},
+};
+
+static const struct etnaviv_format fmt_xrgb8888 = {
+	.format = DE_FORMAT_X8R8G8B8,
+	.swizzle = DE_SWIZZLE_ARGB,
+	.planes = 1,
 };
 
 static const struct etnaviv_format fmt_uyvy = {
@@ -111,6 +120,9 @@ static const struct xv_image_format etnaviv_image_formats[] = {
 	}, {
 		.u.data = &fmt_i420,
 		.xv_image = XVIMAGE_I420,
+	}, {
+		.u.data = &fmt_xrgb8888,
+		.xv_image = XVIMAGE_XRGB8888,
 	}, {
 		.u.data = NULL,
 		.xv_image = XVIMAGE_XVBO,
@@ -420,10 +432,19 @@ static int etnaviv_configure_format(struct etnaviv_xv_priv *priv,
 			priv->stage1_format = priv->source_format;
 			bpp = fmt->xv_image.bits_per_pixel;
 		}
-		priv->stage1_format.tile = 1;
-		priv->stage1_pitch = etnaviv_tile_pitch(width, bpp);
+		priv->stage1_pitch = etnaviv_pitch(width, bpp);
 	} else if (VIV_FEATURE(etnaviv->conn, chipMinorFeatures0, 2DPE20)) {
-		priv->stage1_format = fmt_yuy2;
+		/*
+		 * Documentation (for example i.MX6 reference manual chapter
+		 * 31.4.1.6 Filter BLT) states that the only valid stage1 format
+		 * for the filter blit is YUY2. However in reality it seems that
+		 * we must match the internal component ordering of the source
+		 * image, otherwise the stage1 buffer will be zero filled.
+		 */
+		if (priv->source_format.format == DE_FORMAT_UYVY)
+			priv->stage1_format = fmt_uyvy;
+		else
+			priv->stage1_format = fmt_yuy2;
 		priv->stage1_pitch = etnaviv_pitch(width, 16);
 	} else {
 		priv->stage1_format = vPix->format;
@@ -453,10 +474,7 @@ static int etnaviv_PutImage(ScrnInfoPtr pScrn,
 	Bool is_xvbo = id == FOURCC_XVBO;
 	int s_w, s_h, xoff;
 
-	dst.x1 = drw_x;
-	dst.y1 = drw_y;
-	dst.x2 = drw_x + drw_w;
-	dst.y2 = drw_y + drw_h;
+	box_init(&dst, drw_x, drw_y, drw_w, drw_h);
 
 	x1 = src_x;
 	x2 = src_x + src_w;
@@ -531,10 +549,7 @@ static int etnaviv_PutImage(ScrnInfoPtr pScrn,
 	op.src = INIT_BLIT_BO(usr, 0, priv->source_format, ZERO_OFFSET);
 	op.src_pitches = priv->pitches;
 	op.src_offsets = priv->offsets;
-	op.src_bounds.x1 = xoff >> 16;
-	op.src_bounds.y1 = 0;
-	op.src_bounds.x2 = op.src_bounds.x1 + width;
-	op.src_bounds.y2 = height;
+	box_init(&op.src_bounds, xoff >> 16, 0, width, height);
 
 	etna_set_state_multi(etnaviv->ctx, VIVS_DE_FILTER_KERNEL(0), KERNEL_STATE_SZ,
 			     xv_filter_kernel);
@@ -545,28 +560,22 @@ static int etnaviv_PutImage(ScrnInfoPtr pScrn,
 	 */
 	s_w = x2 - x1;
 	s_h = y2 - y1;
-	drw_w = dst.x2 - dst.x1;
-	drw_h = dst.y2 - dst.y1;
+	drw_w = box_width(&dst);
+	drw_h = box_height(&dst);
 
 	/* Check whether we need to scale in the vertical direction first. */
 	if (s_h != drw_h << 16) {
 		size_t stage1_size = priv->stage1_pitch;
 		BoxRec box;
 
-		if (priv->stage1_format.tile)
-			stage1_size *= etnaviv_tile_height(drw_h);
-		else
-			stage1_size *= drw_h;
+		stage1_size *= drw_h;
 
 		/* Check whether we need to reallocate the temporary bo */
 		if (stage1_size > priv->stage1_size &&
 		    !etnaviv_realloc_stage1(pScrn, priv, stage1_size))
 			goto bad_alloc;
 
-		box.x1 = 0;
-		box.y1 = 0;
-		box.x2 = width;
-		box.y2 = drw_h;
+		box_init(&box, 0, 0, width, drw_h);
 
 		/*
 		 * Perform a vertical filter blit first, converting to
@@ -593,9 +602,7 @@ static int etnaviv_PutImage(ScrnInfoPtr pScrn,
 		 */
 		y1 = 0;
 
-		op.src_bounds.x1 = 0;
-		op.src_bounds.x2 = (x2 + 0xffff) >> 16;
-		op.src_bounds.y2 = drw_h;
+		box_init(&op.src_bounds, 0, 0, (x2 + 0xffff) >> 16, drw_h);
 	} else {
 		/* No need for the vertical scaling stage. */
 		x1 += xoff;
@@ -876,7 +883,7 @@ XF86VideoAdaptorPtr etnaviv_xv_init(ScreenPtr pScreen, unsigned int *caps)
 	has_yuy2 = VIV_FEATURE(etnaviv->conn, chipMinorFeatures0, 2DPE20);
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO,
 		   "etnaviv: Xv: using %s format intermediate YUV target\n",
-		   has_yuy2 ? "YUY2 tiled" : "destination");
+		   has_yuy2 ? "YUY2" : "destination");
 
 	etnaviv->xv = priv;
 	etnaviv->xv_ports = nports;

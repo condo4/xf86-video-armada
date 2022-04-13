@@ -28,9 +28,6 @@
 #include "xf86.h"
 #include "compat-api.h"
 
-#include <etnaviv/etna.h>
-#include <etnaviv/state_2d.xml.h>
-
 #include "cpu_access.h"
 #include "fbutil.h"
 #include "gal_extension.h"
@@ -44,6 +41,10 @@
 #include "etnaviv_render.h"
 #include "etnaviv_utils.h"
 #include "etnaviv_xv.h"
+
+#include <etnaviv/etna_bo.h>
+#include <etnaviv/state_2d.xml.h>
+#include "etnaviv_compat.h"
 
 etnaviv_Key etnaviv_pixmap_index;
 etnaviv_Key etnaviv_screen_index;
@@ -60,121 +61,46 @@ const OptionInfoRec etnaviv_options[] = {
 	{ -1,			NULL,		OPTV_NONE,    {0}, FALSE }
 };
 
-static void etnaviv_free_vpix(struct etnaviv *etnaviv,
-	struct etnaviv_pixmap *vPix)
-{
-	if (vPix->etna_bo) {
-		struct etna_bo *etna_bo = vPix->etna_bo;
-
-		if (!vPix->bo && vPix->state & ST_CPU_RW)
-			etna_bo_cpu_fini(etna_bo);
-		etna_bo_del(etnaviv->conn, etna_bo, NULL);
-	}
-	if (vPix->bo)
-		drm_armada_bo_put(vPix->bo);
-	free(vPix);
-}
-
-void etnaviv_free_busy_vpix(struct etnaviv *etnaviv)
-{
-	struct etnaviv_pixmap *i, *n;
-
-	xorg_list_for_each_entry_safe(i, n, &etnaviv->busy_free_list, busy_node) {
-		if (i->batch_state == B_NONE) {
-			xorg_list_del(&i->busy_node);
-			etnaviv_free_vpix(etnaviv, i);
-		}
-	}
-}
-
 void etnaviv_finish_fences(struct etnaviv *etnaviv, uint32_t fence)
 {
-	struct etnaviv_pixmap *i, *n;
-	int ret;
+	uint32_t last;
 
-	xorg_list_for_each_entry_safe(i, n, &etnaviv->fence_head, batch_node) {
-		assert(i->batch_state == B_FENCED);
-		if (VIV_FENCE_BEFORE(fence, i->fence)) {
-			fence = i->fence;
-			ret = viv_fence_finish(etnaviv->conn, fence, 0);
-			if (ret != VIV_STATUS_OK)
-				break;
-			etnaviv->last_fence = fence;
-		}
-		xorg_list_del(&i->batch_node);
-		i->batch_state = B_NONE;
+	while (1) {
+		last = etnaviv_fence_retire_id(&etnaviv->fence_head, fence);
+		if (last == fence)
+			break;
+
+		if (viv_fence_finish(etnaviv->conn, last, 0) != VIV_STATUS_OK)
+			break;
+
+		fence = last;
 	}
+
+	etnaviv->last_fence = fence;
+}
+
+static void etnaviv_retire_freemem_fence(struct etnaviv_fence_head *fh,
+	struct etnaviv_fence *f)
+{
+	struct etnaviv *etnaviv = container_of(fh, struct etnaviv, fence_head);
+	struct etnaviv_usermem_node *n = container_of(f,
+					struct etnaviv_usermem_node, fence);
+
+	etna_bo_del(etnaviv->conn, n->bo, NULL);
+	free(n->mem);
+	free(n);
 }
 
 void etnaviv_add_freemem(struct etnaviv *etnaviv,
 	struct etnaviv_usermem_node *n)
 {
-	xorg_list_append(&n->node, &etnaviv->usermem_free_list);
-}
-
-static void etnaviv_free_usermem(struct etnaviv *etnaviv)
-{
-	struct etnaviv_usermem_node *i, *n;
-
-	/*
-	 * This is really a hack - we should have proper APIs, but as long
-	 * as we support etnaviv alongside etnadrm, we have no option.
-	 */
-	xorg_list_for_each_entry_safe(i, n, &etnaviv->usermem_free_list, node) {
-		xorg_list_del(&i->node);
-		etnaviv_batch_wait_commit(etnaviv, i->dst);
-		etna_bo_del(etnaviv->conn, i->bo, NULL);
-		free(i->mem);
-		free(i);
-	}
+	n->fence.retire = etnaviv_retire_freemem_fence;
+	etnaviv_fence_add(&etnaviv->fence_head, &n->fence);
 }
 
 static CARD32 etnaviv_cache_expire(OsTimerPtr timer, CARD32 time, pointer arg)
 {
 	return 0;
-}
-
-static void etnaviv_free_pixmap(PixmapPtr pixmap)
-{
-	struct etnaviv_pixmap *vPix = etnaviv_get_pixmap_priv(pixmap);
-
-	if (vPix) {
-		struct etnaviv *etnaviv;
-
-		etnaviv_set_pixmap_priv(pixmap, NULL);
-
-		etnaviv = etnaviv_get_screen_priv(pixmap->drawable.pScreen);
-
-		switch (vPix->batch_state) {
-		case B_NONE:
-			/*
-			 * The pixmap may be only on the CPU, or it may be on
-			 * the GPU but we have already seen a commit+stall.
-			 * We can just free this pixmap.
-			 */
-			etnaviv_free_vpix(etnaviv, vPix);
-			break;
-
-		case B_FENCED:
-			/*
-			 * The pixmap is part of a batch of submitted GPU
-			 * operations.  Check whether it has completed.
-			 */
-			if (VIV_FENCE_BEFORE_EQ(vPix->fence, etnaviv->last_fence)) {
-				xorg_list_del(&vPix->batch_node);
-				etnaviv_free_vpix(etnaviv, vPix);
-				break;
-			}
-
-		case B_PENDING:
-			/*
-			 * The pixmap is part of a batch of unsubmitted GPU
-			 * operations.  Place it on the busy_free_list.
-			 */
-			xorg_list_append(&vPix->busy_node, &etnaviv->busy_free_list);
-			break;
-		}
-	}
 }
 
 /*
@@ -186,10 +112,37 @@ static void etnaviv_flush_callback(CallbackListPtr *list, pointer user_data,
 {
 	ScrnInfoPtr pScrn = user_data;
 	struct etnaviv *etnaviv = pScrn->privates[etnaviv_private_index].ptr;
-	uint32_t fence;
 
-	if (pScrn->vtSema && !xorg_list_is_empty(&etnaviv->batch_head))
-		etnaviv_commit(etnaviv, FALSE, &fence);
+	if (pScrn->vtSema && etnaviv_fence_batch_pending(&etnaviv->fence_head))
+		etnaviv_commit(etnaviv, FALSE);
+}
+
+/* Etnaviv pixmap memory management */
+static void etnaviv_put_vpix(struct etnaviv *etnaviv,
+	struct etnaviv_pixmap *vPix)
+{
+	if (--vPix->refcnt == 0) {
+		if (vPix->etna_bo) {
+			struct etna_bo *etna_bo = vPix->etna_bo;
+
+			if (!vPix->bo && vPix->state & ST_CPU_RW)
+				etna_bo_cpu_fini(etna_bo);
+			etna_bo_del(etnaviv->conn, etna_bo, NULL);
+		}
+		if (vPix->bo)
+			drm_armada_bo_put(vPix->bo);
+		free(vPix);
+	}
+}
+
+static void etnaviv_retire_vpix_fence(struct etnaviv_fence_head *fh,
+	struct etnaviv_fence *f)
+{
+	struct etnaviv *etnaviv = container_of(fh, struct etnaviv, fence_head);
+	struct etnaviv_pixmap *vpix = container_of(f, struct etnaviv_pixmap,
+						   fence);
+
+	etnaviv_put_vpix(etnaviv, vpix);
 }
 
 static struct etnaviv_pixmap *etnaviv_alloc_pixmap(PixmapPtr pixmap,
@@ -203,8 +156,30 @@ static struct etnaviv_pixmap *etnaviv_alloc_pixmap(PixmapPtr pixmap,
 		vpix->height = pixmap->drawable.height;
 		vpix->pitch = pixmap->devKind;
 		vpix->format = fmt;
+		vpix->refcnt = 1;
+		vpix->fence.retire = etnaviv_retire_vpix_fence;
 	}
 	return vpix;
+}
+
+static void etnaviv_free_pixmap(PixmapPtr pixmap)
+{
+	struct etnaviv_pixmap *vPix = etnaviv_get_pixmap_priv(pixmap);
+
+	if (vPix) {
+		struct etnaviv *etnaviv;
+
+		etnaviv_set_pixmap_priv(pixmap, NULL);
+
+		etnaviv = etnaviv_get_screen_priv(pixmap->drawable.pScreen);
+
+		/*
+		 * Put the pixmap - if it's on one of the batch or fence
+		 * lists, they will hold a refcount, which will be dropped
+		 * once the GPU operation is complete.
+		 */
+		etnaviv_put_vpix(etnaviv, vPix);
+	}
 }
 
 
@@ -476,6 +451,9 @@ static Bool etnaviv_CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 #ifdef HAVE_DRI2
 	etnaviv_dri2_CloseScreen(CLOSE_SCREEN_ARGS);
 #endif
+
+	/* Ensure everything has been committed */
+	etnaviv_commit(etnaviv, TRUE);
 
 	pixmap = pScreen->GetScreenPixmap(pScreen);
 	etnaviv_free_pixmap(pixmap);
@@ -784,10 +762,9 @@ static void etnaviv_BlockHandler(BLOCKHANDLER_ARGS_DECL)
 {
 	SCREEN_PTR(arg);
 	struct etnaviv *etnaviv = etnaviv_get_screen_priv(pScreen);
-	uint32_t fence;
 
-	if (!xorg_list_is_empty(&etnaviv->batch_head))
-		etnaviv_commit(etnaviv, FALSE, &fence);
+	if (etnaviv_fence_batch_pending(&etnaviv->fence_head))
+		etnaviv_commit(etnaviv, FALSE);
 
 	mark_flush();
 
@@ -799,30 +776,19 @@ static void etnaviv_BlockHandler(BLOCKHANDLER_ARGS_DECL)
 	/*
 	 * Check for any completed fences.  If the fence numberspace
 	 * wraps, it can allow an idle pixmap to become "active" again.
-	 * This prevents that occuring.
+	 * This prevents that occuring.  Periodically check for completed
+	 * fences.
 	 */
-	if (!xorg_list_is_empty(&etnaviv->fence_head))
-		etnaviv_finish_fences(etnaviv, etnaviv->last_fence);
-
-	/*
-	 * And now try to expire any remaining busy-free pixmaps
-	 */
-	if (!xorg_list_is_empty(&etnaviv->busy_free_list)) {
+	if (etnaviv_fence_fences_pending(&etnaviv->fence_head)) {
 		UpdateCurrentTimeIf();
-		etnaviv_free_busy_vpix(etnaviv);
-		if (!xorg_list_is_empty(&etnaviv->busy_free_list)) {
+		etnaviv_finish_fences(etnaviv, etnaviv->last_fence);
+		if (etnaviv_fence_fences_pending(&etnaviv->fence_head)) {
 			etnaviv->cache_timer = TimerSet(etnaviv->cache_timer,
 							0, 500,
 							etnaviv_cache_expire,
 							etnaviv);
 		}
 	}
-
-	/*
-	 * Try to free any usermem buffers
-	 */
-	if (!xorg_list_is_empty(&etnaviv->usermem_free_list))
-		etnaviv_free_usermem(etnaviv);
 }
 
 static Bool etnaviv_pre_init(ScrnInfoPtr pScrn, int drm_fd)
@@ -883,10 +849,7 @@ static Bool etnaviv_ScreenInit(ScreenPtr pScreen, struct drm_armada_bufmgr *mgr)
 	if (!etnaviv_accel_init(etnaviv))
 		goto fail_accel;
 
-	xorg_list_init(&etnaviv->batch_head);
-	xorg_list_init(&etnaviv->fence_head);
-	xorg_list_init(&etnaviv->busy_free_list);
-	xorg_list_init(&etnaviv->usermem_free_list);
+	etnaviv_fence_head_init(&etnaviv->fence_head);
 
 	etnaviv_set_screen_priv(pScreen, etnaviv);
 

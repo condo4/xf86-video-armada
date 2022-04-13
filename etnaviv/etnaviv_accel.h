@@ -7,18 +7,21 @@
 #ifndef VIVANTE_ACCEL_H
 #define VIVANTE_ACCEL_H
 
-#include <etnaviv/viv.h>
-#include <etnaviv/etna.h>
-#include <etnaviv/etna_bo.h>
 #include "compat-list.h"
 #include "pixmaputil.h"
-#include "etnaviv_compat.h"
+#include "etnaviv_fence.h"
 #include "etnaviv_op.h"
+#include "etnaviv_compat_xorg.h"
+
+#include <etnaviv/viv.h>
 
 struct armada_accel_ops;
 struct drm_armada_bo;
 struct drm_armada_bufmgr;
 struct etnaviv_dri2_info;
+
+/* From libetnaviv */
+struct etna_bo;
 
 #undef DEBUG
 
@@ -76,19 +79,13 @@ enum {
 struct etnaviv {
 	struct viv_conn *conn;
 	struct etna_ctx *ctx;
-	/* pixmaps queued for next commit */
-	struct xorg_list batch_head;
-	/* pixmaps committed with fence id, ordered by id */
-	struct xorg_list fence_head;
-	struct xorg_list busy_free_list;
-	struct xorg_list usermem_free_list;
+	struct etnaviv_fence_head fence_head;
 	OsTimerPtr cache_timer;
 	uint32_t last_fence;
 	Bool force_fallback;
 	struct drm_armada_bufmgr *bufmgr;
 	uint32_t bugs[1];
-	struct etnaviv_blit_buf gc320_wa_src;
-	struct etnaviv_blit_buf gc320_wa_dst;
+	struct etnaviv_de_op gc320_wa;
 	struct etna_bo *gc320_etna_bo;
 	int scrnIndex;
 #ifdef HAVE_DRI2
@@ -144,15 +141,8 @@ struct etnaviv_pixmap {
 	unsigned pitch;
 	struct etnaviv_format format;
 	struct etnaviv_format pict_format;
-	struct xorg_list batch_node;
-	struct xorg_list busy_node;
-	uint32_t fence;
+	struct etnaviv_fence fence;
 	viv_usermem_t info;
-
-	uint8_t batch_state;
-#define B_NONE		0
-#define B_PENDING	1
-#define B_FENCED	2
 
 	uint8_t state;
 #define ST_CPU_R	(1 << 0)
@@ -169,11 +159,11 @@ struct etnaviv_pixmap {
 	struct drm_armada_bo *bo;
 	struct etna_bo *etna_bo;
 	uint32_t name;
+	unsigned int refcnt;
 };
 
 struct etnaviv_usermem_node {
-	struct xorg_list node;
-	struct etnaviv_pixmap *dst;
+	struct etnaviv_fence fence;
 	struct etna_bo *bo;
 	void *mem;
 };
@@ -221,9 +211,8 @@ Bool etnaviv_accel_PolyFillRectSolid(DrawablePtr pDrawable, GCPtr pGC, int n,
 Bool etnaviv_accel_PolyFillRectTiled(DrawablePtr pDrawable, GCPtr pGC, int n,
 	xRectangle * prect);
 
-void etnaviv_commit(struct etnaviv *etnaviv, Bool stall, uint32_t *fence);
+void etnaviv_commit(struct etnaviv *etnaviv, Bool stall);
 void etnaviv_finish_fences(struct etnaviv *etnaviv, uint32_t fence);
-void etnaviv_free_busy_vpix(struct etnaviv *etnaviv);
 
 void etnaviv_batch_wait_commit(struct etnaviv *etnaviv, struct etnaviv_pixmap *vPix);
 void etnaviv_batch_start(struct etnaviv *etnaviv,

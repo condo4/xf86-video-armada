@@ -15,8 +15,9 @@ struct common_drm_device {
 
 struct common_crtc_info {
 	int drm_fd;
+	uint32_t drm_id;
 	unsigned num;
-	drmModeCrtcPtr mode_crtc;
+	uint32_t primary_plane_id;
 	void *cursor_data;
 	uint32_t cursor_handle;
 	uint32_t rotate_fb_id;
@@ -24,6 +25,7 @@ struct common_crtc_info {
 	uint64_t last_msc;
 	uint64_t swap_msc;
 	uint64_t swap_ust;
+	Bool has_cursor2;
 };
 #define common_crtc(crtc) \
 	((struct common_crtc_info *)(crtc)->driver_private)
@@ -33,6 +35,11 @@ struct drm_udev_info {
 	pointer *handler;
 	dev_t drm_dev;
 	CloseScreenProcPtr CloseScreen;
+};
+
+struct common_drm_plane {
+	drmModePlanePtr mode_plane;
+	drmModeObjectPropertiesPtr mode_props;
 };
 
 struct common_drm_info {
@@ -60,6 +67,11 @@ struct common_drm_info {
 #ifdef HAVE_UDEV
 	struct drm_udev_info udev;
 #endif
+
+	Bool has_universal_planes;
+	void *plane_property_hash;
+	unsigned int num_overlay_planes;
+	struct common_drm_plane *overlay_planes;
 
 	OptionInfoPtr Options;
 	CloseScreenProcPtr CloseScreen;
@@ -99,12 +111,22 @@ void common_drm_crtc_shadow_destroy(xf86CrtcPtr crtc);
 Bool common_drm_init_mode_resources(ScrnInfoPtr pScrn,
 	const xf86CrtcFuncsRec *funcs);
 
+drmModePropertyPtr common_drm_plane_get_property(ScrnInfoPtr pScrn,
+	uint32_t prop_id);
+void common_drm_cleanup_plane_resources(ScrnInfoPtr pScrn);
+Bool common_drm_init_plane_resources(ScrnInfoPtr pScrn);
+
 Bool common_drm_flip(ScrnInfoPtr pScrn, PixmapPtr pixmap,
 	struct common_drm_event *event, xf86CrtcPtr ref_crtc);
 void common_drm_flip_pixmap(ScreenPtr pScreen, PixmapPtr a, PixmapPtr b);
 
 void common_drm_LoadPalette(ScrnInfoPtr pScrn, int num, int *indices,
 	LOCO *colors, VisualPtr pVisual);
+int __common_drm_get_cap(ScrnInfoPtr pScrn, uint64_t cap, uint64_t *val,
+        const char *name);
+#define common_drm_get_cap(pScrn, cap, val) \
+	__common_drm_get_cap(pScrn, cap, val, #cap)
+Bool common_drm_PreInit(ScrnInfoPtr pScrn, int flags24);
 Bool common_drm_PreScreenInit(ScreenPtr pScreen);
 Bool common_drm_PostScreenInit(ScreenPtr pScreen);
 Bool common_drm_SwitchMode(SWITCH_MODE_ARGS_DECL);

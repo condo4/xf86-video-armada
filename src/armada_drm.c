@@ -36,6 +36,7 @@
 const OptionInfoRec armada_drm_options[] = {
 	{ OPTION_XV_ACCEL,	"XvAccel",	   OPTV_BOOLEAN, {0}, FALSE },
 	{ OPTION_XV_PREFEROVL,	"XvPreferOverlay", OPTV_BOOLEAN, {0}, TRUE  },
+	{ OPTION_XV_DISPRIMARY, "XvDisablePrimary",OPTV_BOOLEAN, {0}, FALSE },
 	{ OPTION_USE_GPU,	"UseGPU",	   OPTV_BOOLEAN, {0}, FALSE },
 	{ OPTION_USE_KMS_BO,	"UseKMSBo",	   OPTV_BOOLEAN, {0}, FALSE },
 	{ OPTION_ACCEL_MODULE,	"AccelModule",	   OPTV_STRING,  {0}, FALSE },
@@ -254,12 +255,9 @@ static void armada_drm_crtc_destroy(xf86CrtcPtr crtc)
 	struct common_crtc_info *drmc = common_crtc(crtc);
 
 	if (drmc->cursor_data) {
-		drmModeSetCursor(drmc->drm_fd, drmc->mode_crtc->crtc_id,
-				 0, 0, 0);
+		drmModeSetCursor(drmc->drm_fd, drmc->drm_id, 0, 0, 0);
 		drm_armada_bo_put(drmc->cursor_data);
 	}
-	drmModeFreeCrtc(drmc->mode_crtc);
-
 	free(drmc);
 }
 
@@ -559,20 +557,6 @@ static Bool armada_drm_pre_init(ScrnInfoPtr pScrn)
 	return TRUE;
 }
 
-static int armada_get_cap(int fd, uint64_t cap, uint64_t *val, int scrnIndex,
-	const char *name)
-{
-	int err;
-
-	err = drmGetCap(fd, cap, val);
-	if (err)
-		xf86DrvMsg(scrnIndex, X_ERROR,
-			   "[drm] failed to get %s capability: %s\n",
-			   name, strerror(errno));
-
-	return err;
-}
-
 static Bool armada_drm_alloc(ScrnInfoPtr pScrn,
 	struct common_drm_device *drm_dev)
 {
@@ -590,8 +574,9 @@ static Bool armada_drm_alloc(ScrnInfoPtr pScrn,
 	drm->common.fd = drm_dev->fd;
 	drm->common.dev = drm_dev;
 
-	if (armada_get_cap(drm->common.fd, DRM_CAP_PRIME, &val,
-			   pScrn->scrnIndex, "DRM_CAP_PRIME"))
+	SET_DRM_INFO(pScrn, &drm->common);
+
+	if (common_drm_get_cap(pScrn, DRM_CAP_PRIME, &val))
 		goto err_free;
 	if (!(val & DRM_PRIME_CAP_EXPORT)) {
 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
@@ -599,8 +584,7 @@ static Bool armada_drm_alloc(ScrnInfoPtr pScrn,
 		goto err_free;
 	}
 
-	if (armada_get_cap(drm->common.fd, DRM_CAP_DUMB_BUFFER, &val,
-			   pScrn->scrnIndex, "DRM_CAP_DUMB_BUFFER"))
+	if (common_drm_get_cap(pScrn, DRM_CAP_DUMB_BUFFER, &val))
 		goto err_free;
 	if (!val) {
 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
@@ -615,8 +599,6 @@ static Bool armada_drm_alloc(ScrnInfoPtr pScrn,
 		goto err_free;
 	}
 
-	SET_DRM_INFO(pScrn, &drm->common);
-
 	drm->armada.version = drmGetVersion(drm->common.fd);
 	if (drm->armada.version)
 		xf86DrvMsg(pScrn->scrnIndex, X_INFO, "hardware: %s\n",
@@ -625,6 +607,7 @@ static Bool armada_drm_alloc(ScrnInfoPtr pScrn,
 	return TRUE;
 
  err_free:
+	SET_DRM_INFO(pScrn, NULL);
 	free(drm);
 	return FALSE;
 }
@@ -648,7 +631,6 @@ static void armada_drm_FreeScreen(FREE_SCREEN_ARGS_DECL)
 static Bool armada_drm_PreInit(ScrnInfoPtr pScrn, int flags)
 {
 	struct common_drm_device *drm_dev;
-	rgb defaultWeight = { 0, 0, 0 };
 
 	if (pScrn->numEntities != 1)
 		return FALSE;
@@ -666,13 +648,10 @@ static Bool armada_drm_PreInit(ScrnInfoPtr pScrn, int flags)
 
 	/* Limit the maximum framebuffer size to 16MB */
 	pScrn->videoRam = 16 * 1048576;
-	pScrn->monitor = pScrn->confScreen->monitor;
-	pScrn->progClock = TRUE;
-	pScrn->rgbBits = 8;
 	pScrn->chipset = "fbdev";
-	pScrn->displayWidth = 640;
 
-	if (!xf86SetDepthBpp(pScrn, 0, 0, 0, Support32bppFb))
+	flags24 = Support24bppFb | Support32bppFb | SupportConvert24to32;
+	if (!common_drm_PreInit(pScrn, flags24))
 		goto fail;
 
 	switch (pScrn->depth) {
@@ -687,13 +666,6 @@ static Bool armada_drm_PreInit(ScrnInfoPtr pScrn, int flags)
 			   pScrn->depth);
 		goto fail;
 	}
-
-	xf86PrintDepthBpp(pScrn);
-
-	if (!xf86SetWeight(pScrn, defaultWeight, defaultWeight))
-		goto fail;
-	if (!xf86SetDefaultVisual(pScrn, -1))
-		goto fail;
 
 	if (pScrn->depth > 8 && pScrn->defaultVisual != TrueColor) {
 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,

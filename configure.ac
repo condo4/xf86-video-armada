@@ -77,10 +77,10 @@ AC_ARG_WITH(xorg-module-dir,
 
 # Vivante GPU acceleration using libGAL
 AC_ARG_ENABLE(vivante,
-	      AC_HELP_STRING([--disable-vivante],
-			     [Disable Vivante libGAL acceleration support [[default=enable]]]),
+	      AC_HELP_STRING([--enable-vivante],
+			     [Enable Vivante libGAL acceleration support [[default=disabled]]]),
 	      [ACCEL_GALCORE="$enableval"],
-	      [ACCEL_GALCORE=auto])
+	      [ACCEL_GALCORE=no])
 
 AC_ARG_WITH(libgal-include,
             AC_HELP_STRING([--with-libgal-include=PATH],
@@ -126,15 +126,15 @@ AC_MSG_RESULT([$ACCEL_GALCORE])
 # Etnaviv GPU acceleration
 AC_ARG_ENABLE(etnadrm,
 	      AC_HELP_STRING([--disable-etnadrm],
-			     [Disable Etnaviv DRM acceleration support [[default=enabled]]]),
+			     [Disable Etnaviv (DRM kernel driver) acceleration support [[default=enabled]]]),
 	      [ACCEL_ETNADRM="$enableval"],
 	      [ACCEL_ETNADRM=auto])
 
 AC_ARG_ENABLE(etnaviv,
-	      AC_HELP_STRING([--disable-etnaviv],
-			     [Disable Etnaviv acceleration support [[default=enable]]]),
+	      AC_HELP_STRING([--enable-etnaviv],
+			     [Enable Etnaviv (GALcore kernel driver) acceleration support [[default=disabled]]]),
 	      [ACCEL_ETNAVIV="$enableval"],
-	      [ACCEL_ETNAVIV=auto])
+	      [ACCEL_ETNAVIV=no])
 
 AC_ARG_WITH(etnaviv-source,
             AC_HELP_STRING([--with-etnaviv-source=PATH],
@@ -155,8 +155,24 @@ AS_IF([test x$ACCEL_ETNAVIV != xno || test x$ACCEL_ETNADRM != xno],
       [
    AS_IF([test x$etnaviv_source != x],
          [
-           ETNAVIV_CFLAGS="-I$etnaviv_source/src"
-           ETNAVIV_LIBS="-L$etnaviv_source/src/etnaviv"
+      AC_MSG_CHECKING([location of etnaviv hardware headers])
+      AS_IF([test -f "$etnaviv_source/src/etnaviv/common.xml.h"],
+            [libetnaviv_includes="$etnaviv_source/src"],
+            [AC_MSG_ERROR([Could not find libetnaviv hardware headers])])
+      AC_MSG_RESULT([$libetnaviv_includes])
+      AC_MSG_CHECKING([location of libetnaviv source tree])
+      AS_IF([test -f "$etnaviv_source/src/etnaviv/etna.h"],
+            [libetnaviv_source="$etnaviv_source/src"],
+            [
+         AS_IF([test -f "$etnaviv_source/attic/etnaviv/etna.h"],
+               [libetnaviv_source="$etnaviv_source/attic"],
+               [
+                  AC_MSG_ERROR([Could not find libetnaviv source within $etnaviv_source])
+               ])
+            ])
+      ETNAVIV_CFLAGS="-I$libetnaviv_source -I$libetnaviv_includes"
+      ETNAVIV_LIBS="-L$libetnaviv_source/etnaviv"
+      AC_MSG_RESULT([$libetnaviv_source])
          ],
          [
            AS_IF([test x$etnaviv_include = x],
@@ -172,33 +188,40 @@ AS_IF([test x$ACCEL_ETNAVIV != xno || test x$ACCEL_ETNADRM != xno],
    saved_CFLAGS="$CFLAGS"
    LDFLAGS="$LDFLAGS $ETNAVIV_LIBS"
    CFLAGS="$CFLAGS $ETNAVIV_CFLAGS"
-   AC_CHECK_LIB([etnaviv], [viv_open],
-                [AS_IF([test x$ACCEL_ETNAVIV = xauto], [ACCEL_ETNAVIV=yes])
-		 AS_IF([test x$ACCEL_ETNADRM = xauto], [ACCEL_ETNADRM=yes])],
-                [ACCEL_ETNAVIV=no ACCEL_ETNADRM=no])
+   AS_IF([test x$ACCEL_ETNADRM = xauto], [ACCEL_ETNADRM=yes], [ACCEL_ETNADRM=no])
+   AS_IF([test x$ACCEL_ETNAVIV != xno],
+         [
+      AC_CHECK_LIB([etnaviv], [viv_open],
+                   [AS_IF([test x$ACCEL_ETNAVIV = xauto],
+			  [ACCEL_ETNAVIV=yes],
+			  [
+                       AC_MSG_ERROR([etnaviv (GALcore kernel driver) support requires libetnaviv library])
+                    ])],
+                   [ACCEL_ETNAVIV=no])
+   ])
    AS_IF([test x$ACCEL_ETNAVIV != xno],
          [
       AC_CHECK_LIB([etnaviv], [etna_bo_from_dmabuf],
                    [DUMMY=y],
-                   [AC_MSG_ERROR([etnaviv support requires etna_bo_from_dmabuf()])])
+                   [AC_MSG_ERROR([etnaviv (GALcore kernel driver) support requires etna_bo_from_dmabuf()])])
       AC_CHECK_LIB([etnaviv], [etna_bo_from_usermem_prot],
                    [DUMMY=y],
-                   [AC_MSG_ERROR([etnaviv support requires etna_bo_from_usermem_prot()])])
+                   [AC_MSG_ERROR([etnaviv (GALcore kernel driver) support requires etna_bo_from_usermem_prot()])])
    ])
    LDFLAGS="$saved_LDFLAGS"
    CFLAGS="$saved_CFLAGS"
    AS_IF([test x$PKGCFG_ETNAVIV != xyes], [ETNAVIV_LIBS+=" -letnaviv"])
 ])
-AC_MSG_CHECKING([whether to build Etnaviv acceleration support])
+AC_MSG_CHECKING([whether to build Etnaviv (GALcore kernel driver) acceleration support])
 AS_IF([test x$ACCEL_ETNAVIV = xyes],
-      [AC_DEFINE(HAVE_ACCEL_ETNAVIV,1,[Enable Etnaviv acceleration support])
+      [AC_DEFINE(HAVE_ACCEL_ETNAVIV,1,[Enable Etnaviv (GALcore kernel driver) acceleration support])
        DRIVERS="etnaviv_gpu $DRIVERS"])
 AM_CONDITIONAL(HAVE_ACCEL_ETNAVIV, test x$ACCEL_ETNAVIV = xyes)
 AC_MSG_RESULT([$ACCEL_ETNAVIV])
 
-AC_MSG_CHECKING([whether to build Etnaviv DRM acceleration support])
+AC_MSG_CHECKING([whether to build Etnaviv (DRM kernel driver) acceleration support])
 AS_IF([test x$ACCEL_ETNADRM = xyes],
-      [AC_DEFINE(HAVE_ACCEL_ETNADRM,1,[Enable Etnaviv DRM acceleration support])
+      [AC_DEFINE(HAVE_ACCEL_ETNADRM,1,[Enable Etnaviv (DRM kernel driver) acceleration support])
        DRIVERS="etnadrm_gpu $DRIVERS"])
 AM_CONDITIONAL(HAVE_ACCEL_ETNADRM, test x$ACCEL_ETNADRM = xyes)
 AC_MSG_RESULT([$ACCEL_ETNADRM])
@@ -209,17 +232,17 @@ AC_ARG_ENABLE(dri2, AC_HELP_STRING([--disable-dri2],
 		[DRI2=auto])
 
 AC_ARG_ENABLE(dri3, AC_HELP_STRING([--disable-dri3],
-		[Disable DRI3 support [[default=auto]]]),
+		[Disable DRI3 support [[default=disabled]]]),
 		[DRI3="$enableval"],
-		[DRI3=auto])
+		[DRI3=no])
 
 AC_ARG_ENABLE(present, AC_HELP_STRING([--disable-present],
-		[Disable PRESENT support [[default=auto]]]),
+		[Disable PRESENT support [[default=disabled]]]),
 		[PRESENT="$enableval"],
-		[PRESENT=auto])
+		[PRESENT=no])
 
 # Checks for pkg-config packages
-PKG_CHECK_MODULES(XORG, [xorg-server >= 1.9.99.1 xproto fontsproto])
+PKG_CHECK_MODULES(XORG, [xorg-server >= 1.9.99.1 xproto fontsproto pixman-1])
 sdkdir=$(pkg-config --variable=sdkdir xorg-server)
 
 # Checks for required extensions
@@ -228,7 +251,7 @@ XORG_DRIVER_CHECK_EXT(RENDER, renderproto)
 XORG_DRIVER_CHECK_EXT(XV, videoproto)
 
 # Obtain compilter/linker options for the driver dependencies
-PKG_CHECK_MODULES(DRM, [libdrm >= 2.4.38])
+PKG_CHECK_MODULES(DRM, [libdrm >= 2.4.47])
 PKG_CHECK_MODULES(DRMARMADA, [libdrm_armada >= 2.0.0])
 
 save_LDFLAGS="$LDFLAGS"
@@ -273,7 +296,9 @@ PKG_CHECK_MODULES(PRESENT, [presentproto >= 1.0], , PRESENT=no)
 if test x$PRESENT != xno; then
    save_CFLAGS=$CFLAGS
    CFLAGS="$XORG_CFLAGS $PRESENT_CFLAGS"
-   AC_CHECK_HEADERS([present.h], PRESENT=yes, PRESENT=no, [#include <dixstruct.h>])
+   AC_CHECK_HEADERS([present.h], PRESENT=yes, PRESENT=no,
+	[#include <xorg-server.h>]
+	[#include <dixstruct.h>])
    CFLAGS=$save_CFLAGS
 fi
 AC_MSG_CHECKING([whether to include PRESENT support])

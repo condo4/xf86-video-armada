@@ -118,12 +118,16 @@ static void etnaviv_set_source_bo(struct etnaviv *etnaviv,
 {
 	uint32_t src_cfg = etnaviv_src_config(buf->format, src_origin_mode ==
 					       SRC_ORIGIN_RELATIVE);
+	uint32_t rot_cfg = buf->rotate == DE_ROT_MODE_ROT90 &&
+		!VIV_FEATURE(etnaviv->conn, chipMinorFeatures0, 2DPE20) ?
+		VIVS_DE_SRC_ROTATION_CONFIG_ROTATION_ENABLE :
+		VIVS_DE_SRC_ROTATION_CONFIG_ROTATION_DISABLE;
 
 	EL_START(etnaviv, 6);
 	EL(LOADSTATE(VIVS_DE_SRC_ADDRESS, 5));
 	EL_RELOC(buf->bo, 0, FALSE);
 	EL(VIVS_DE_SRC_STRIDE_STRIDE(buf->pitch));
-	EL(VIVS_DE_SRC_ROTATION_CONFIG_ROTATION_DISABLE);
+	EL(VIVS_DE_SRC_ROTATION_CONFIG_WIDTH(buf->width) | rot_cfg);
 	EL(src_cfg);
 	EL(VIVS_DE_SRC_ORIGIN_X(buf->offset.x) |
 	   VIVS_DE_SRC_ORIGIN_Y(buf->offset.y));
@@ -190,12 +194,17 @@ static void etnaviv_set_blend(struct etnaviv *etnaviv,
 		EL(VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
 	} else {
 		Bool pe20 = VIV_FEATURE(etnaviv->conn, chipMinorFeatures0, 2DPE20);
+		uint32_t alpha_mode;
+
+		alpha_mode = op->alpha_mode |
+			VIVS_DE_ALPHA_MODES_SRC_BLENDING_MODE(op->src_mode) |
+			VIVS_DE_ALPHA_MODES_DST_BLENDING_MODE(op->dst_mode);
 
 		EL(LOADSTATE(VIVS_DE_ALPHA_CONTROL, 2));
 		EL(VIVS_DE_ALPHA_CONTROL_ENABLE_ON |
 		   VIVS_DE_ALPHA_CONTROL_PE10_GLOBAL_SRC_ALPHA(op->src_alpha) |
 		   VIVS_DE_ALPHA_CONTROL_PE10_GLOBAL_DST_ALPHA(op->dst_alpha));
-		EL(op->alpha_mode);
+		EL(alpha_mode);
 		EL_ALIGN();
 
 		if (pe20) {
@@ -209,6 +218,23 @@ static void etnaviv_set_blend(struct etnaviv *etnaviv,
 		}
 	}
 	EL_END();
+}
+
+static void etnaviv_emit_src_rotate(struct etnaviv *etnaviv,
+	const struct etnaviv_blit_buf *src)
+{
+	if (VIV_FEATURE(etnaviv->conn, chipMinorFeatures0, 2DPE20)) {
+		EL_START(etnaviv, 4);
+		EL(LOADSTATE(VIVS_DE_SRC_ROTATION_HEIGHT, 2));
+		EL(VIVS_DE_SRC_ROTATION_HEIGHT_HEIGHT(src->height));
+		EL(VIVS_DE_ROT_ANGLE_SRC(src->rotate) |
+		   VIVS_DE_ROT_ANGLE_DST(DE_ROT_MODE_ROT0) |
+		   (~VIVS_DE_ROT_ANGLE_SRC_MASK &
+		    ~VIVS_DE_ROT_ANGLE_DST_MASK &
+		    ~VIVS_DE_ROT_ANGLE_SRC__MASK &
+		    ~VIVS_DE_ROT_ANGLE_DST__MASK));
+		EL_END();
+	}
 }
 
 static size_t etnaviv_size_2d_draw(struct etnaviv *etnaviv, size_t n)
@@ -234,10 +260,8 @@ static void etnaviv_emit_2d_draw(struct etnaviv *etnaviv, const BoxRec *pbox,
 	EL_END();
 }
 
-void etnaviv_de_start(struct etnaviv *etnaviv, const struct etnaviv_de_op *op)
+static void de_start(struct etnaviv *etnaviv, const struct etnaviv_de_op *op)
 {
-	BATCH_SETUP_START(etnaviv);
-
 	if (op->src.bo)
 		etnaviv_set_source_bo(etnaviv, &op->src, op->src_origin_mode);
 	etnaviv_set_dest_bo(etnaviv, &op->dst, op->cmd);
@@ -246,23 +270,23 @@ void etnaviv_de_start(struct etnaviv *etnaviv, const struct etnaviv_de_op *op)
 		etnaviv_emit_brush(etnaviv, op->fg_colour);
 	etnaviv_emit_rop_clip(etnaviv, op->rop, op->rop, op->clip,
 			      op->dst.offset);
+	etnaviv_emit_src_rotate(etnaviv, &op->src);
+}
 
+void etnaviv_de_start(struct etnaviv *etnaviv, const struct etnaviv_de_op *op)
+{
+	BATCH_SETUP_START(etnaviv);
+	de_start(etnaviv, op);
 	BATCH_SETUP_END(etnaviv);
 }
 
 void etnaviv_de_end(struct etnaviv *etnaviv)
 {
 	if (etnaviv->gc320_etna_bo) {
-		BoxRec box = { 0, 1, 1, 2 };
-
-		/* Append the GC320 workaround - 6 + 6 + 2 + 4 + 4 */
-		etnaviv_set_source_bo(etnaviv, &etnaviv->gc320_wa_src,
-				      SRC_ORIGIN_RELATIVE);
-		etnaviv_set_dest_bo(etnaviv, &etnaviv->gc320_wa_dst,
-				    VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT);
-		etnaviv_set_blend(etnaviv, NULL);
-		etnaviv_emit_rop_clip(etnaviv, 0xcc, 0xcc, &box, ZERO_OFFSET);
-		etnaviv_emit_2d_draw(etnaviv, &box, 1, ZERO_OFFSET);
+		/* Append the GC320 workaround - 6 + 6 + 2 + 4 + 4 + 4 */
+		de_start(etnaviv, &etnaviv->gc320_wa);
+		etnaviv_emit_2d_draw(etnaviv, etnaviv->gc320_wa.clip, 1,
+				     ZERO_OFFSET);
 	}
 
 	/* Append a flush, semaphore and stall to ensure that the FE */
@@ -419,7 +443,7 @@ void etnaviv_vr_op(struct etnaviv *etnaviv, struct etnaviv_vr_op *op,
 
 	etnaviv_set_dest_bo(etnaviv, &op->dst, op->cmd);
 
-	EL_START(etnaviv, 10 * 8 * n);
+	EL_START(etnaviv, 10);
 	EL(LOADSTATE(VIVS_DE_ALPHA_CONTROL, 1));
 	EL(VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
 
@@ -433,11 +457,17 @@ void etnaviv_vr_op(struct etnaviv *etnaviv, struct etnaviv_vr_op *op,
 	   VIVS_DE_VR_SOURCE_IMAGE_LOW_TOP(op->src_bounds.y1));
 	EL(VIVS_DE_VR_SOURCE_IMAGE_HIGH_RIGHT(op->src_bounds.x2) |
 	   VIVS_DE_VR_SOURCE_IMAGE_HIGH_BOTTOM(op->src_bounds.y2));
-	EL_ALIGN();
+	EL_END();
+	BATCH_SETUP_END(etnaviv);
 
 	while (n--) {
-		BoxRec box = *boxes++;
+		BoxRec box = *boxes;
 		uint32_t x, y;
+
+		if (8 > MAX_BATCH_SIZE - etnaviv->batch_size) {
+			etnaviv_emit(etnaviv);
+			BATCH_OP_START(etnaviv);
+		}
 
 		x = x1 + (box.x1 - dst->x1) * op->h_scale;
 		y = y1 + (box.y1 - dst->y1) * op->v_scale;
@@ -448,6 +478,7 @@ void etnaviv_vr_op(struct etnaviv *etnaviv, struct etnaviv_vr_op *op,
 		box.x2 += op->dst.offset.x;
 		box.y2 += op->dst.offset.y;
 
+		EL_START(etnaviv, 8);
 		/* 6 */
 		EL(LOADSTATE(VIVS_DE_VR_SOURCE_ORIGIN_LOW, 4));
 		EL(VIVS_DE_VR_SOURCE_ORIGIN_LOW_X(x));
@@ -461,8 +492,9 @@ void etnaviv_vr_op(struct etnaviv *etnaviv, struct etnaviv_vr_op *op,
 		/* 2 */
 		EL(LOADSTATE(VIVS_DE_VR_CONFIG, 1));
 		EL(op->vr_op);
+		EL_END();
+		boxes++;
 	}
-	EL_END();
 
 	etnaviv_emit(etnaviv);
 }

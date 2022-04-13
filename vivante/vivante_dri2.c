@@ -21,6 +21,7 @@
 #include <xf86drm.h>
 #include <armada_bufmgr.h>
 
+#include "boxutil.h"
 #include "compat-api.h"
 #include "common_drm.h"
 #include "common_drm_dri2.h"
@@ -167,10 +168,7 @@ vivante_dri2_blit(ClientPtr client, DrawablePtr draw, DRI2BufferPtr front,
 	RegionRec region;
 	BoxRec box;
 
-	box.x1 = 0;
-	box.y1 = 0;
-	box.x2 = draw->width;
-	box.y2 = draw->height;
+	box_init(&box, 0, 0, draw->width, draw->height);
 	RegionInit(&region, &box, 0);
 
 	vivante_dri2_CopyRegion(draw, &region, front, back);
@@ -229,7 +227,8 @@ vivante_dri2_ScheduleSwap(ClientPtr client, DrawablePtr draw,
 	common_dri2_buffer_reference(front);
 	common_dri2_buffer_reference(back);
 
-	if (common_drm_get_msc(crtc, &cur_ust, &cur_msc) != Success)
+	if (common_drm_get_drawable_msc(crtc, draw, &cur_ust, &cur_msc) !=
+	    Success)
 		goto blit_free;
 
 	/* Flips need to be submitted one frame before */
@@ -289,9 +288,10 @@ vivante_dri2_ScheduleSwap(ClientPtr client, DrawablePtr draw,
 			tgt_msc -= 1;
 	}
 
-	ret = common_drm_queue_msc_event(pScrn, crtc, &tgt_msc, __FUNCTION__,
-					    wait->type != DRI2_FLIP,
-					    &wait->base);
+	ret = common_drm_queue_drawable_msc_event(pScrn, crtc, draw, &tgt_msc,
+						  __FUNCTION__,
+						  wait->type != DRI2_FLIP,
+						  &wait->base);
 	if (ret)
 		goto blit_free;
 

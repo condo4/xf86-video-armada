@@ -16,11 +16,14 @@
 #include <xf86drmMode.h>
 
 #include "xf86.h"
+#include "cursorstr.h"
 
 #include "boxutil.h"
+#include "pixmaputil.h"
 
 #include "backlight.h"
 #include "common_drm.h"
+#include "common_drm_conn.h"
 #include "common_drm_helper.h"
 #include "xf86_OSproc.h"
 #include "xf86Crtc.h"
@@ -76,6 +79,10 @@ static DevPrivateKeyRec pixmap_key;
 struct common_pixmap {
 	uint32_t handle;
 	void *data;
+	xf86CrtcPtr crtc;
+	uint64_t last_ust;
+	uint64_t last_msc;
+	int64_t delta_msc;
 };
 
 static struct common_pixmap *common_drm_pixmap(PixmapPtr pixmap)
@@ -163,13 +170,20 @@ static uint64_t common_drm_frame_to_msc(xf86CrtcPtr crtc, uint32_t seq)
 {
 	struct common_crtc_info *drmc = common_crtc(crtc);
 
-	if (seq < drmc->last_seq) {
-		if ((int32_t)(drmc->last_seq - seq) > 0x40000000)
-			drmc->last_msc += 0x100000000ULL;
-		else
-			seq = drmc->last_seq;
-	}
+	/*
+	 * The sequence counter wrapped.  Unlike the misleading comments in
+	 * xf86-video-intel, the vblank counter is never wound backwards: it
+	 * always runs forwards.  However, since we don't monitor it with
+	 * any regularity, it can appear to go backwards if we wait (eg)
+	 * 0xc0000000 vblanks between calls.  Hence, whenever we see the
+	 * frame sequence less than the last sequence, assume that it has
+	 * wrapped.  (It may have wrapped more than once.)
+	 */
+	if (seq < drmc->last_seq)
+		drmc->last_msc += 0x100000000ULL;
+
 	drmc->last_seq = seq;
+
 	return drmc->last_msc + seq;
 }
 
@@ -714,15 +728,7 @@ static Bool common_drm_crtc_apply(xf86CrtcPtr crtc, uint32_t front_fb_id)
 	if (!output_ids)
 		return FALSE;
 
-	for (output_num = i = 0; i < xf86_config->num_output; i++) {
-		xf86OutputPtr output = xf86_config->output[i];
-		struct common_conn_info *conn;
-
-		if (output->crtc == crtc) {
-			conn = output->driver_private;
-			output_ids[output_num++] = conn->mode_output->connector_id;
-		}
-	}
+	output_num = common_drm_conn_output_ids(crtc, output_ids);
 
 	if (!xf86CrtcRotate(crtc)) {
 		ret = FALSE;
@@ -743,12 +749,12 @@ static Bool common_drm_crtc_apply(xf86CrtcPtr crtc, uint32_t front_fb_id)
 
 	drmmode_ConvertToKMode(&kmode, &crtc->mode);
 
-	ret = drmModeSetCrtc(drmc->drm_fd, drmc->mode_crtc->crtc_id, fb_id,
+	ret = drmModeSetCrtc(drmc->drm_fd, drmc->drm_id, fb_id,
 			     x, y, output_ids, output_num, &kmode);
 	if (ret) {
 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
 			   "[drm] failed to set mode on crtc %u: %s\n",
-			   drmc->mode_crtc->crtc_id, strerror(errno));
+			   drmc->drm_id, strerror(errno));
 		ret = FALSE;
 	} else {
 		ret = TRUE;
@@ -836,7 +842,7 @@ void common_drm_crtc_gamma_set(xf86CrtcPtr crtc,
 {
 	struct common_crtc_info *drmc = common_crtc(crtc);
 
-	drmModeCrtcSetGamma(drmc->drm_fd, drmc->mode_crtc->crtc_id,
+	drmModeCrtcSetGamma(drmc->drm_fd, drmc->drm_id,
 			    size, red, green, blue);
 }
 
@@ -844,24 +850,34 @@ void common_drm_crtc_set_cursor_position(xf86CrtcPtr crtc, int x, int y)
 {
 	struct common_crtc_info *drmc = common_crtc(crtc);
 
-	drmModeMoveCursor(drmc->drm_fd, drmc->mode_crtc->crtc_id, x, y);
+	drmModeMoveCursor(drmc->drm_fd, drmc->drm_id, x, y);
 }
 
 void common_drm_crtc_show_cursor(xf86CrtcPtr crtc)
 {
 	struct common_drm_info *drm = GET_DRM_INFO(crtc->scrn);
 	struct common_crtc_info *drmc = common_crtc(crtc);
+	uint32_t crtc_id = drmc->drm_id;
+	uint32_t handle = drmc->cursor_handle;
+	uint32_t width = drm->cursor_max_width;
+	uint32_t height = drm->cursor_max_height;
 
-	drmModeSetCursor(drmc->drm_fd, drmc->mode_crtc->crtc_id,
-			 drmc->cursor_handle,
-			 drm->cursor_max_width, drm->cursor_max_height);
+	if (drmc->has_cursor2) {
+		xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(crtc->scrn);
+		CursorBitsPtr cursor_bits = config->cursor->bits;
+
+		drmModeSetCursor2(drmc->drm_fd, crtc_id, handle, width, height,
+				  cursor_bits->xhot, cursor_bits->yhot);
+	} else {
+		drmModeSetCursor(drmc->drm_fd, crtc_id, handle, width, height);
+	}
 }
 
 void common_drm_crtc_hide_cursor(xf86CrtcPtr crtc)
 {
 	struct common_crtc_info *drmc = common_crtc(crtc);
 
-	drmModeSetCursor(drmc->drm_fd, drmc->mode_crtc->crtc_id, 0, 0, 0);
+	drmModeSetCursor(drmc->drm_fd, drmc->drm_id, 0, 0, 0);
 }
 
 Bool common_drm_crtc_shadow_allocate(xf86CrtcPtr crtc, int width, int height,
@@ -911,13 +927,15 @@ static Bool common_drm_crtc_init(ScrnInfoPtr pScrn, unsigned num,
 
 	drmc = xnfcalloc(1, sizeof *drmc);
 	drmc->drm_fd = drm->fd;
+	drmc->drm_id = id;
 	drmc->num = num;
-	drmc->mode_crtc = drmModeGetCrtc(drmc->drm_fd, id);
 	crtc->driver_private = drmc;
 
 	/* Test whether hardware cursor is supported */
 	if (drmModeSetCursor(drmc->drm_fd, id, 0, 0, 0))
 		drm->has_hw_cursor = FALSE;
+	else if (!drmModeSetCursor2(drmc->drm_fd, id, 0, 0, 0, 0, 0))
+		drmc->has_cursor2 = TRUE;
 
 	return TRUE;
 }
@@ -1054,9 +1072,8 @@ Bool common_drm_flip(ScrnInfoPtr pScrn, PixmapPtr pixmap,
 		event->handler = common_drm_flip_handler;
 
 		drmc = common_crtc(crtc);
-		if (drmModePageFlip(drm->fd, drmc->mode_crtc->crtc_id,
-				    drm->fb_id, DRM_MODE_PAGE_FLIP_EVENT,
-				    event)) {
+		if (drmModePageFlip(drm->fd, drmc->drm_id, drm->fb_id,
+				    DRM_MODE_PAGE_FLIP_EVENT, event)) {
 			xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
 				   "page flip: queue failed: %s\n", strerror(errno));
 			free(event);
@@ -1098,9 +1115,8 @@ void common_drm_flip_pixmap(ScreenPtr pScreen, PixmapPtr front, PixmapPtr b)
 	*common_drm_pixmap(b) = front_c;
 
 	/* Mark the front pixmap as having changed */
-	region.extents.x1 = region.extents.y1 = 0;
-	region.extents.x2 = front->drawable.width;
-	region.extents.y2 = front->drawable.height;
+	box_init(&region.extents, 0, 0,
+		 front->drawable.width, front->drawable.height);
 	region.data = NULL;
 
 	DamageRegionAppend(&front->drawable, &region);
@@ -1247,6 +1263,62 @@ static Bool common_drm_CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	pScrn->vtSema = FALSE;
 
 	return ret;
+}
+
+int __common_drm_get_cap(ScrnInfoPtr pScrn, uint64_t cap, uint64_t *val,
+	const char *name)
+{
+	struct common_drm_info *drm = GET_DRM_INFO(pScrn);
+	int err;
+
+	err = drmGetCap(drm->fd, cap, val);
+	if (err)
+		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+			   "[drm] failed to get %s capability: %s\n",
+			   name, strerror(errno));
+
+	return err;
+}
+
+Bool common_drm_PreInit(ScrnInfoPtr pScrn, int flags24)
+{
+	struct common_drm_info *drm = GET_DRM_INFO(pScrn);
+	rgb defaultWeight = { 0, 0, 0 };
+	uint64_t val;
+	int depth, bpp;
+
+	pScrn->monitor = pScrn->confScreen->monitor;
+	pScrn->progClock = TRUE;
+	pScrn->rgbBits = 8;
+	pScrn->displayWidth = 640;
+
+	depth = bpp = 0;
+	if (drmGetCap(drm->fd, DRM_CAP_DUMB_PREFERRED_DEPTH, &val) == 0) {
+		switch (val) {
+		case 8:
+		case 15:
+		case 16:
+			bpp = (val + 7) & ~7;
+			depth = val;
+			break;
+		default:
+			depth = 24;
+			break;
+		}
+	}
+
+	if (!xf86SetDepthBpp(pScrn, depth, depth, bpp, flags24))
+		return FALSE;
+
+	xf86PrintDepthBpp(pScrn);
+
+	if (!xf86SetWeight(pScrn, defaultWeight, defaultWeight))
+		return FALSE;
+
+	if (!xf86SetDefaultVisual(pScrn, -1))
+		return FALSE;
+
+	return TRUE;
 }
 
 Bool common_drm_PreScreenInit(ScreenPtr pScreen)
@@ -1485,7 +1557,7 @@ Bool common_drm_EnterVT(VT_FUNC_ARGS_DECL)
 		struct common_crtc_info *drmc = common_crtc(crtc);
 
 		if (!crtc->enabled)
-			drmModeSetCrtc(drmc->drm_fd, drmc->mode_crtc->crtc_id,
+			drmModeSetCrtc(drmc->drm_fd, drmc->drm_id,
 				       0, 0, 0, NULL, 0, NULL);
 	}
 
@@ -1534,15 +1606,14 @@ xf86CrtcPtr common_drm_covering_crtc(ScrnInfoPtr pScrn, BoxPtr box,
 
 	best_crtc = NULL;
 	best_coverage = 0;
-	box_ret->x1 = box_ret->x2 = box_ret->y1 = box_ret->y2 = 0;
+	box_init(box_ret, 0, 0, 0, 0);
 	for (c = 0; c < xf86_config->num_crtc; c++) {
 		crtc = xf86_config->crtc[c];
 		if (!crtc->enabled)
 			continue;
-		crtc_box.x1 = crtc->x;
-		crtc_box.x2 = crtc->x + xf86ModeWidth(&crtc->mode, crtc->rotation);
-		crtc_box.y1 = crtc->y;
-		crtc_box.y2 = crtc->y + xf86ModeHeight(&crtc->mode, crtc->rotation);
+		box_init(&crtc_box, crtc->x, crtc->y,
+		         xf86ModeWidth(&crtc->mode, crtc->rotation),
+			 xf86ModeHeight(&crtc->mode, crtc->rotation));
 		box_intersect(&cover_box, &crtc_box, box);
 		coverage = box_area(&cover_box);
 		if (coverage && crtc == desired) {
@@ -1564,10 +1635,7 @@ xf86CrtcPtr common_drm_drawable_covering_crtc(DrawablePtr pDraw)
 	xf86CrtcPtr crtc;
 	BoxRec box, crtcbox;
 
-	box.x1 = pDraw->x;
-	box.y1 = pDraw->y;
-	box.x2 = box.x1 + pDraw->width;
-	box.y2 = box.y1 + pDraw->height;
+	box_init(&box, pDraw->x, pDraw->y, pDraw->width, pDraw->height);
 
 	crtc = common_drm_covering_crtc(pScrn, &box, NULL, &crtcbox);
 
@@ -1623,6 +1691,51 @@ int common_drm_get_msc(xf86CrtcPtr crtc, uint64_t *ust, uint64_t *msc)
 }
 
 _X_EXPORT
+int common_drm_get_drawable_msc(xf86CrtcPtr crtc, DrawablePtr pDraw,
+	uint64_t *ust, uint64_t *msc)
+{
+	struct common_pixmap *drawc;
+	int ret = Success;
+
+	if (!pDraw && !crtc) {
+		*ust = *msc = 0;
+		return Success;
+	}
+
+	if (!pDraw)
+		return common_drm_get_msc(crtc, ust, msc);
+
+	drawc = common_drm_pixmap(drawable_pixmap(pDraw));
+
+	if (drawc->crtc) {
+		uint64_t old_ust, old_msc;
+
+		ret = common_drm_get_msc(drawc->crtc, &old_ust, &old_msc);
+		if (ret == Success) {
+			drawc->last_ust = old_ust;
+			drawc->last_msc = old_msc + drawc->delta_msc;
+		}
+	}
+
+	if (drawc->crtc != crtc) {
+		uint64_t new_ust, new_msc;
+
+		drawc->crtc = crtc;
+
+		if (crtc) {
+			ret = common_drm_get_msc(crtc, &new_ust, &new_msc);
+			if (ret == Success)
+				drawc->delta_msc = drawc->last_msc - new_msc;
+		}
+	}
+
+	*ust = drawc->last_ust;
+	*msc = drawc->last_msc;
+
+	return ret;
+}
+
+_X_EXPORT
 int common_drm_queue_msc_event(ScrnInfoPtr pScrn, xf86CrtcPtr crtc,
 	uint64_t *msc, const char *func, Bool nextonmiss,
 	struct common_drm_event *event)
@@ -1646,6 +1759,34 @@ int common_drm_queue_msc_event(ScrnInfoPtr pScrn, xf86CrtcPtr crtc,
 			   __FUNCTION__, strerror(errno));
 	else
 		*msc = common_drm_frame_to_msc(crtc, vbl.reply.sequence);
+
+	return ret;
+}
+
+_X_EXPORT
+int common_drm_queue_drawable_msc_event(ScrnInfoPtr pScrn, xf86CrtcPtr crtc,
+	DrawablePtr pDraw, uint64_t *pmsc, const char *func, Bool nextonmiss,
+	struct common_drm_event *event)
+{
+	struct common_pixmap *drawc;
+	uint64_t msc = *pmsc;
+	int64_t delta = 0;
+	int ret;
+
+	/*
+	 * If we have a drawable, we need to correct the MSC for the
+	 * drawable delta.
+	 */
+	if (pDraw) {
+		drawc = common_drm_pixmap(drawable_pixmap(pDraw));
+		delta = drawc->delta_msc;
+		msc -= delta;
+	}
+
+	ret = common_drm_queue_msc_event(pScrn, crtc, &msc, func, nextonmiss,
+					 event);
+
+	*pmsc = msc + delta;
 
 	return ret;
 }

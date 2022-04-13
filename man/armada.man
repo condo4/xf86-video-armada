@@ -120,6 +120,18 @@ Enable or disable the X Video backend.
 .IP
 Default: enabled.
 .TP
+.BI "Option \*qXvDisablePrimary\*q \*q" boolean \*q
+Allow the X Video backend to disable the primary plane when X Video
+image is displayed at full screen.
+.IP
+.B Note:
+Some kernel drivers may not fully support this (eg, the kernel driver
+does a full modeset when restoring the primary plane, causing the
+screen to momentarily blank.)  This option should be disabled for such
+kernel drivers, or the kernel driver updated to avoid such behaviour.
+.IP
+Default: enabled.
+.TP
 .BI "Option \*qXvPreferOverlay\*q \*q" boolean \*q
 Make the hardware overlay the first XV adapter.  Disabling this option
 makes any GPU provided textured overlay the first XV adapter.
@@ -150,6 +162,10 @@ the overlay window.  Other values select an explicit CRTC.  Default: -1.
 These options can be used to adjust the overlaid picture brightness,
 contrast and saturation levels.  These options are dependent on their
 presence in the Linux kernel drm driver.
+.SS "XV_ITURBT_709"
+XV_ITURBT_709 sets the colorimetry for YUV format video.  A value of 0
+selects ITU-R BT.601 colorspace.  A value of 1 selects ITU-R BT.709
+colorspace.  This option is dependent on the Linux kernel drm driver.
 
 
 .SH XV TEXTURED VIDEO ATTRIBUTES
