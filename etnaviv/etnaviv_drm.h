@@ -25,6 +25,11 @@
 #define ETNAVIV_DATE_PENGUTRONIX4	20151214
 #define ETNAVIV_DATE			ETNAVIV_DATE_PENGUTRONIX
 
+// By default use the latest
+#ifndef DEFAULT_ETNAVIV_DATE
+#define DEFAULT_ETNAVIV_DATE  ETNAVIV_DATE_PENGUTRONIX4
+#endif
+
 #include <stddef.h>
 #include "drm.h"
 
