@@ -191,6 +191,14 @@ int viv_open(enum viv_hw_type hw_type, struct viv_conn **out)
 	 */
 	ec->api_date = atoi(version->date);
 
+	/*
+	 * Since kernel 6.11, the date returned by the drm is always 0.
+	 * Use a default value instead, which can be overriden. It means that
+	 * this date has to be aligned with the kernel etnaviv drm date...
+	 */
+	if (!ec->api_date)
+		ec->api_date = DEFAULT_ETNAVIV_DATE;
+
 	conn->base_address = 0;
 
 	/*
